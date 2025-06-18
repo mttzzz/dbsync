@@ -1,0 +1,27 @@
+# Бинарные файлы
+/bin/
+*.exe
+
+# Временные файлы
+/tmp/
+*.tmp
+*.log
+
+# Go специфичные файлы
+vendor/
+*.test
+*.out
+
+# IDE файлы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Конфигурационные файлы с секретами
+.env
+.env.local
+
+# OS специфичные файлы
+.DS_Store
+Thumbs.db

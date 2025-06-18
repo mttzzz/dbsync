@@ -1,0 +1,208 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24.1'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run vet
+      run: go vet ./...
+
+    - name: Install staticcheck
+      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+    - name: Run staticcheck
+      run: staticcheck ./...
+
+    - name: Run unit tests
+      run: go test -v -race -coverprofile=coverage.out ./internal/config ./internal/models ./internal/version ./pkg/utils ./internal/services ./internal/cli ./internal/ui
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Wait for MySQL to be ready
+      run: |
+        while ! mysqladmin ping -h"127.0.0.1" -P3306 -uroot -proot --silent; do
+          echo "Waiting for MySQL..."
+          sleep 2
+        done
+
+    - name: Create test database and user
+      run: |
+        mysql -h127.0.0.1 -P3306 -uroot -proot -e "CREATE DATABASE IF NOT EXISTS dbsync_test;"
+        mysql -h127.0.0.1 -P3306 -uroot -proot -e "CREATE USER IF NOT EXISTS 'test_user'@'%' IDENTIFIED BY 'test_password';"
+        mysql -h127.0.0.1 -P3306 -uroot -proot -e "GRANT ALL PRIVILEGES ON dbsync_test.* TO 'test_user'@'%';"
+        mysql -h127.0.0.1 -P3306 -uroot -proot -e "FLUSH PRIVILEGES;"
+
+    - name: Run integration tests
+      env:
+        DBSYNC_TEST_REMOTE_HOST: 127.0.0.1
+        DBSYNC_TEST_REMOTE_PORT: 3306
+        DBSYNC_TEST_REMOTE_USER: test_user
+        DBSYNC_TEST_REMOTE_PASSWORD: test_password
+        DBSYNC_TEST_LOCAL_HOST: 127.0.0.1
+        DBSYNC_TEST_LOCAL_PORT: 3306
+        DBSYNC_TEST_LOCAL_USER: test_user
+        DBSYNC_TEST_LOCAL_PASSWORD: test_password
+      run: go test -v -tags=integration ./test/integration
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+        exclude:
+          # Windows ARM64 не поддерживается в Go 1.24.1
+          - goos: windows
+            goarch: arm64
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24.1'
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        # Определяем расширение файла для Windows
+        EXT=""
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          EXT=".exe"
+        fi
+        
+        # Создаём директорию для артефактов
+        mkdir -p dist
+        
+        # Собираем бинарный файл
+        go build -ldflags="-X 'db-sync-cli/internal/version.Version=${{ github.ref_name }}' -X 'db-sync-cli/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'db-sync-cli/internal/version.GitCommit=${{ github.sha }}'" -o dist/dbsync-${{ matrix.goos }}-${{ matrix.goarch }}${EXT} ./cmd/dbsync
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dbsync-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release
+        find artifacts/ -name "dbsync-*" -type f | while read file; do
+          # Извлекаем имя файла без пути
+          filename=$(basename "$file")
+          cp "$file" "release/$filename"
+        done
+        ls -la release/
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/*
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: your-dockerhub-username/dbsync
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        platforms: linux/amd64,linux/arm64
+        cache-from: type=gha
+        cache-to: type=gha,mode=max

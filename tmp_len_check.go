@@ -1,0 +1,8 @@
+package main
+
+import "fmt"
+
+func main() {
+	filename := "this_is_a_very_long_filename_that_exceeds_the_maximum_allowed_length_for_most_filesystems_and_should_be_rejected_by_validation_function_because_it_is_way_too_long_to_be_practical_and_goes_well_beyond_the_255_character_limit_that_we_have_set_and_this_additional_text_makes_it_even_longer.sql"
+	fmt.Println("Length:", len(filename))
+}
