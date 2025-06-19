@@ -49,7 +49,7 @@
 | **Linux** | ARM64 | `dbsync-vX.X.X-linux-arm64.tar.gz` |
 | **Linux** | 32-bit | `dbsync-vX.X.X-linux-386.tar.gz` |
 | **macOS** | Intel | `dbsync-vX.X.X-darwin-amd64.tar.gz` |
-| **macOS** | Apple Silicon (M1/M2) | `dbsync-vX.X.X-darwin-arm64.tar.gz` |
+| **macOS** | Apple Silicon (M1/M2/M3/M4/M+) | `dbsync-vX.X.X-darwin-arm64.tar.gz` |
 
 ### 🔧 Установка по платформам
 
@@ -96,7 +96,7 @@ dbsync version
 # Для Intel Mac
 curl -L "https://github.com/mttzzz/dbsync/releases/latest/download/dbsync-vX.X.X-darwin-amd64.tar.gz" | tar -xz
 
-# Для Apple Silicon (M1/M2)
+# Для Apple Silicon (M1/M2/M3/M4/M+)
 curl -L "https://github.com/mttzzz/dbsync/releases/latest/download/dbsync-vX.X.X-darwin-arm64.tar.gz" | tar -xz
 
 # Перемещение в системную папку
