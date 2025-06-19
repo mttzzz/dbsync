@@ -114,13 +114,6 @@ dbsync version
 
 </details>
 
-### 🔄 Типы релизов
-
-| Тип релиза | Статус | Описание |
-|------------|--------|----------|
-| 🏷️ **Стабильные** | [![GitHub release](https://img.shields.io/github/v/release/mttzzz/dbsync)](https://github.com/mttzzz/dbsync/releases/latest) | Релизы с тегами версий для продуктивного использования |
-| 🌙 **Nightly** | [![Nightly](https://img.shields.io/badge/nightly-latest-orange)](https://github.com/mttzzz/dbsync/releases/tag/nightly) | Ежедневные сборки с последними изменениями |
-| 📅 **Weekly** | [![Weekly](https://img.shields.io/badge/weekly-dev-blue)](https://github.com/mttzzz/dbsync/releases/tag/weekly) | Еженедельные сборки для тестирования новых функций |
 
 ## ⚙️ Настройка
 
