@@ -229,7 +229,7 @@ func clearEnvVars() {
 	for _, envVar := range envVars {
 		os.Unsetenv(envVar)
 	}
-	
+
 	// Также очищаем рабочую директорию от .env файлов для тестов
 	os.Remove(".env")
 }
