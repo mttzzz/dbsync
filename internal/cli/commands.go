@@ -33,7 +33,9 @@ var syncCmd = &cobra.Command{
 	Long: `Synchronize a specific database from remote server to local server.
 If database name is not provided, an interactive selection will be shown.
 
-Use --dry-run flag to see what would be done without making changes.`,
+Available flags:
+  --dry-run   Show what would be done without making changes
+  --force     Skip confirmation prompts for destructive operations`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
@@ -201,14 +203,14 @@ var statusCmd = &cobra.Command{
 		fmt.Println()
 
 		// Проверяем удаленный сервер
-		remoteInfo, err := dbService.TestConnection(true)
+		remoteInfo, _ := dbService.TestConnection(true)
 		output := formatter.FormatConnectionStatus(remoteInfo, "Remote")
 		fmt.Print(output)
 
 		fmt.Println()
 
 		// Проверяем локальный сервер
-		localInfo, err := dbService.TestConnection(false)
+		localInfo, _ := dbService.TestConnection(false)
 		output = formatter.FormatConnectionStatus(localInfo, "Local")
 		fmt.Print(output)
 
