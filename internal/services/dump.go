@@ -158,6 +158,7 @@ func (ds *DumpService) CreateDump(databaseName string, dryRun bool) (*models.Syn
 		"--port="+fmt.Sprintf("%d", ds.config.Remote.Port),
 		"--user="+ds.config.Remote.User,
 		"--password="+ds.config.Remote.Password,
+		"--databases",
 		databaseName,
 	)
 
@@ -253,31 +254,47 @@ func (ds *DumpService) RestoreDump(dumpPath string, databaseName string, dryRun 
 		return fmt.Errorf("dump file does not exist: %s", dumpPath)
 	}
 
-	// Сначала удаляем существующую БД если она есть
-	dropCmd := exec.Command(
-		ds.config.Dump.MysqlPath,
-		"--host="+ds.config.Local.Host,
-		"--port="+fmt.Sprintf("%d", ds.config.Local.Port),
-		"--user="+ds.config.Local.User,
-		"--password="+ds.config.Local.Password,
-		"-e", fmt.Sprintf("DROP DATABASE IF EXISTS %s", databaseName),
-	)
+	// Проверяем существует ли локальная база данных перед попыткой удаления
+	localExists, err := ds.dbService.DatabaseExists(databaseName, false)
+	if err != nil {
+		return fmt.Errorf("failed to check if local database exists: %w", err)
+	}
 
-	if err := dropCmd.Run(); err != nil {
-		return fmt.Errorf("failed to drop existing database: %w", err)
+	// Удаляем существующую БД только если она действительно существует
+	if localExists {
+		fmt.Printf("🗑️  Dropping existing local database '%s'...\n", databaseName)
+		dropCmd := exec.Command(
+			ds.config.Dump.MysqlPath,
+			"--host="+ds.config.Local.Host,
+			"--port="+fmt.Sprintf("%d", ds.config.Local.Port),
+			"--user="+ds.config.Local.User,
+			"--password="+ds.config.Local.Password,
+			"-e", fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", databaseName),
+		)
+
+		if err := dropCmd.Run(); err != nil {
+			return fmt.Errorf("failed to drop existing database: %w", err)
+		}
+	} else {
+		fmt.Printf("ℹ️  Local database '%s' does not exist, skipping drop step\n", databaseName)
 	}
 
 	// Создаём новую БД
+	fmt.Printf("🔨 Creating local database '%s'...\n", databaseName)
 	createCmd := exec.Command(
 		ds.config.Dump.MysqlPath,
 		"--host="+ds.config.Local.Host,
 		"--port="+fmt.Sprintf("%d", ds.config.Local.Port),
 		"--user="+ds.config.Local.User,
 		"--password="+ds.config.Local.Password,
-		"-e", fmt.Sprintf("CREATE DATABASE %s", databaseName),
+		"-e", fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", databaseName),
 	)
 
 	if err := createCmd.Run(); err != nil {
+		// Получаем детальную информацию об ошибке
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("failed to create database: %w (stderr: %s)", err, string(exitError.Stderr))
+		}
 		return fmt.Errorf("failed to create database: %w", err)
 	}
 
@@ -294,9 +311,9 @@ func (ds *DumpService) RestoreDump(dumpPath string, databaseName string, dryRun 
 		"--port="+fmt.Sprintf("%d", ds.config.Local.Port),
 		"--user="+ds.config.Local.User,
 		"--password="+ds.config.Local.Password,
-		"--compress",               // Сжимает соединение
-		"--quick",                  // Экономит память
 		"--max_allowed_packet=1GB", // Увеличивает размер пакета
+		"--quick",                  // Экономит память при чтении
+		"--init-command=SET foreign_key_checks=0; SET unique_checks=0; SET autocommit=0;", // Оптимизации
 		databaseName,
 	)
 
@@ -345,6 +362,7 @@ func (ds *DumpService) RestoreDump(dumpPath string, databaseName string, dryRun 
 
 			// Финальный прогресс
 			fmt.Printf("\r✅ Restore completed                                        \n")
+
 			return nil
 
 		case <-ticker.C:
@@ -463,8 +481,17 @@ func (ds *DumpService) GetDumpCommand(databaseName string) []string {
 
 // GetRestoreCommand возвращает команду mysql для восстановления (для отображения в dry-run)
 func (ds *DumpService) GetRestoreCommand(databaseName string) []string {
-	args := ds.config.Local.GetMysqlArgs(databaseName)
-	return append([]string{ds.config.Dump.MysqlPath}, args...)
+	return []string{
+		ds.config.Dump.MysqlPath,
+		"--host=" + ds.config.Local.Host,
+		"--port=" + fmt.Sprintf("%d", ds.config.Local.Port),
+		"--user=" + ds.config.Local.User,
+		"--password=" + ds.config.Local.Password,
+		"--max_allowed_packet=1GB",
+		"--quick",
+		"--init-command=SET foreign_key_checks=0; SET unique_checks=0; SET autocommit=0;",
+		databaseName,
+	}
 }
 
 // GetSafetyChecks возвращает список проверок безопасности
