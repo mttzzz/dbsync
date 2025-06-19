@@ -11,7 +11,6 @@
 **Безопасная консольная утилита для синхронизации MySQL баз данных между удалённым и локальным сервером**
 
 [![GitHub release](https://img.shields.io/github/v/release/mttzzz/dbsync)](https://github.com/mttzzz/dbsync/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/mttzzz/dbsync/total)](https://github.com/mttzzz/dbsync/releases)
 
 [📦 Скачать релиз](#-установка) • [📖 Использование](#-использование) • [🐛 Сообщить об ошибке](https://github.com/mttzzz/dbsync/issues)
 
