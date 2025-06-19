@@ -3,8 +3,16 @@ name: CI/CD
 on:
   push:
     branches: [ main, develop ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
+  schedule:
+    # Еженедельная проверка в воскресенье в 02:00 UTC
+    - cron: '0 2 * * 0'
+
+env:
+  GO_VERSION: '1.24.1'
 
 jobs:
   test:
@@ -26,7 +34,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24.1'
+        go-version: ${{ env.GO_VERSION }}
 
     - name: Cache Go modules
       uses: actions/cache@v3
@@ -95,27 +103,63 @@ jobs:
     
     strategy:
       matrix:
-        goos: [linux, windows, darwin]
-        goarch: [amd64, arm64]
-        exclude:
-          # Windows ARM64 не поддерживается в Go 1.24.1
-          - goos: windows
+        include:
+          # Linux
+          - goos: linux
+            goarch: amd64
+            platform: linux/amd64
+          - goos: linux
             goarch: arm64
+            platform: linux/arm64
+          - goos: linux
+            goarch: 386
+            platform: linux/386
+          # Windows
+          - goos: windows
+            goarch: amd64
+            platform: windows/amd64
+          - goos: windows
+            goarch: 386
+            platform: windows/386
+          # macOS
+          - goos: darwin
+            goarch: amd64
+            platform: darwin/amd64
+          - goos: darwin
+            goarch: arm64
+            platform: darwin/arm64
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Получаем полную историю для генерации версии
 
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.24.1'
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Generate version info
+      id: version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          VERSION="v0.0.0-main-$(git rev-parse --short HEAD)"
+        else
+          VERSION="v0.0.0-${GITHUB_REF#refs/heads/}-$(git rev-parse --short HEAD)"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+        echo "git_commit=${{ github.sha }}" >> $GITHUB_OUTPUT
 
     - name: Build binary
       env:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
       run: |
-        # Определяем расширение файла для Windows
+        # Определяем расширение файла
         EXT=""
         if [ "${{ matrix.goos }}" = "windows" ]; then
           EXT=".exe"
@@ -124,85 +168,263 @@ jobs:
         # Создаём директорию для артефактов
         mkdir -p dist
         
-        # Собираем бинарный файл
-        go build -ldflags="-X 'db-sync-cli/internal/version.Version=${{ github.ref_name }}' -X 'db-sync-cli/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'db-sync-cli/internal/version.GitCommit=${{ github.sha }}'" -o dist/dbsync-${{ matrix.goos }}-${{ matrix.goarch }}${EXT} ./cmd/dbsync
+        # Имя файла
+        FILENAME="dbsync-${{ steps.version.outputs.version }}-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}"
+        
+        # Собираем бинарный файл с версионной информацией
+        go build \
+          -ldflags="-s -w -X 'db-sync-cli/internal/version.Version=${{ steps.version.outputs.version }}' \
+                    -X 'db-sync-cli/internal/version.BuildDate=${{ steps.version.outputs.build_date }}' \
+                    -X 'db-sync-cli/internal/version.GitCommit=${{ steps.version.outputs.git_commit }}'" \
+          -o "dist/${FILENAME}" \
+          ./cmd/dbsync
+        
+        # Создаём архив
+        cd dist
+        if [ "${{ matrix.goos }}" = "windows" ]; then
+          zip "${FILENAME%.exe}.zip" "$FILENAME"
+        else
+          tar -czf "${FILENAME}.tar.gz" "$FILENAME"
+        fi
+        
+        # Информация о сборке
+        echo "Built: $FILENAME"
+        ls -la
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: dbsync-${{ matrix.goos }}-${{ matrix.goarch }}
         path: dist/
+        retention-days: 30
 
-  release:
+  # Релиз для тегов (стабильные релизы)
+  release-tag:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [test, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
     - uses: actions/checkout@v4
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: artifacts/
 
     - name: Prepare release assets
       run: |
         mkdir -p release
-        find artifacts/ -name "dbsync-*" -type f | while read file; do
-          # Извлекаем имя файла без пути
+        find artifacts/ -type f \( -name "*.zip" -o -name "*.tar.gz" \) | while read file; do
           filename=$(basename "$file")
           cp "$file" "release/$filename"
         done
-        ls -la release/
+        
+        # Создаём checksums
+        cd release
+        sha256sum * > checksums.txt
+        
+        echo "Release files:"
+        ls -la
 
-    - name: Create Release
+    - name: Extract release notes
+      id: release_notes
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Попытка извлечь release notes из CHANGELOG если существует
+        if [ -f CHANGELOG.md ]; then
+          awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.txt
+        fi
+        
+        if [ ! -s release_notes.txt ]; then
+          echo "🚀 Релиз $VERSION" > release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 📦 Что нового:" >> release_notes.txt
+          echo "- Улучшения и исправления ошибок" >> release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 💾 Скачать:" >> release_notes.txt
+          echo "Выберите подходящую версию для вашей платформы ниже." >> release_notes.txt
+        fi
+
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         files: release/*
-        generate_release_notes: true
+        body_path: release_notes.txt
         draft: false
-        prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') }}
+        prerelease: ${{ contains(github.ref, 'beta') || contains(github.ref, 'alpha') || contains(github.ref, 'rc') }}
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  docker:
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    needs: test
+  # Автоматический релиз для main ветки (nightly builds)
+  release-nightly:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [test, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Login to Docker Hub
-      if: startsWith(github.ref, 'refs/tags/v')
-      uses: docker/login-action@v3
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
       with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+        path: artifacts/
 
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: your-dockerhub-username/dbsync
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=semver,pattern={{version}}
-          type=semver,pattern={{major}}.{{minor}}
-          type=semver,pattern={{major}}
+    - name: Prepare nightly release
+      run: |
+        mkdir -p release
+        find artifacts/ -type f \( -name "*.zip" -o -name "*.tar.gz" \) | while read file; do
+          filename=$(basename "$file")
+          cp "$file" "release/$filename"
+        done
+        
+        cd release
+        sha256sum * > checksums.txt
+        
+        echo "Nightly build files:"
+        ls -la
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
+    - name: Delete existing nightly release
+      continue-on-error: true
+      run: |
+        gh release delete nightly --yes || true
+        git push origin --delete nightly || true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create nightly tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -f nightly
+        git push origin nightly --force
+
+    - name: Create Nightly Release
+      uses: softprops/action-gh-release@v1
       with:
-        context: .
-        push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        platforms: linux/amd64,linux/arm64
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        tag_name: nightly
+        name: "🌙 Nightly Build"
+        files: release/*
+        body: |
+          🌙 **Автоматическая сборка из main ветки**
+          
+          ⚠️ **Внимание**: Это экспериментальная сборка, которая может содержать нестабильные изменения.
+          
+          📅 **Дата сборки**: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+          🔗 **Коммит**: ${{ github.sha }}
+          
+          ### 📦 Доступные платформы:
+          - **Linux**: x86_64, ARM64, i386
+          - **Windows**: x86_64, i386  
+          - **macOS**: Intel (x86_64), Apple Silicon (ARM64)
+          
+          ### 🚀 Установка:
+          1. Скачайте архив для вашей платформы
+          2. Распакуйте архив
+          3. Скопируйте исполняемый файл в папку PATH
+          
+          💾 **Проверка целостности**: используйте `checksums.txt` для проверки SHA256
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Еженедельный релиз для develop ветки
+  release-weekly:
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'schedule'
+    needs: [test, build] 
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+
+    - name: Prepare weekly release
+      run: |
+        mkdir -p release
+        find artifacts/ -type f \( -name "*.zip" -o -name "*.tar.gz" \) | while read file; do
+          filename=$(basename "$file")
+          cp "$file" "release/$filename"
+        done
+        
+        cd release
+        sha256sum * > checksums.txt
+
+    - name: Delete existing weekly release  
+      continue-on-error: true
+      run: |
+        gh release delete weekly --yes || true
+        git push origin --delete weekly || true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create weekly tag
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        WEEK=$(date +%Y-W%V)
+        git tag -f weekly
+        git push origin weekly --force
+
+    - name: Create Weekly Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: weekly
+        name: "📅 Weekly Development Build"
+        files: release/*
+        body: |
+          📅 **Еженедельная сборка из develop ветки**
+          
+          🚧 **Статус**: Сборка для разработки и тестирования новых функций
+          
+          📅 **Неделя**: $(date +%Y-W%V)
+          🔗 **Коммит**: ${{ github.sha }}
+          
+          ### 🧪 Для разработчиков:
+          Эта сборка содержит последние изменения из develop ветки и предназначена для:
+          - Тестирования новых функций
+          - Раннего доступа к улучшениям
+          - Обратной связи от сообщества
+          
+          ⚠️ **Не рекомендуется для продуктивного использования**
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Уведомления о релизах
+  notify:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release-tag]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Extract version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Create summary
+      run: |
+        echo "# 🚀 Релиз ${{ steps.version.outputs.version }} опубликован!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 📦 Доступные сборки:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Linux**: x86_64, ARM64, i386" >> $GITHUB_STEP_SUMMARY
+        echo "- **Windows**: x86_64, i386" >> $GITHUB_STEP_SUMMARY  
+        echo "- **macOS**: Intel (x86_64), Apple Silicon (ARM64)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## 🔗 Ссылки:" >> $GITHUB_STEP_SUMMARY
+        echo "- [📋 Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+        echo "- [📦 Все релизы](https://github.com/${{ github.repository }}/releases)" >> $GITHUB_STEP_SUMMARY
