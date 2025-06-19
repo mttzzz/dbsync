@@ -50,10 +50,6 @@ var (
 	normalStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#777777"))
 
-	highlightStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Bold(true)
-
 	infoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#888888")).
 			Italic(true)

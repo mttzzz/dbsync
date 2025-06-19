@@ -36,6 +36,7 @@ func TestDumpService_NewDumpService(t *testing.T) {
 
 	if service == nil {
 		t.Error("NewDumpService() returned nil")
+		return
 	}
 
 	if service.config != cfg {

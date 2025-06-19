@@ -115,6 +115,53 @@ func Load() (*Config, error) {
 	return &config, nil
 }
 
+// LoadForTest загружает конфигурацию с изолированным viper экземпляром для тестов
+func LoadForTest() (*Config, error) {
+	v := viper.New()
+	setDefaults(v)
+
+	// Настройка чтения переменных окружения
+	v.SetEnvPrefix("DBSYNC")
+	v.AutomaticEnv()
+
+	// Явно связываем переменные окружения с полями конфигурации
+	v.BindEnv("remote.host", "DBSYNC_REMOTE_HOST")
+	v.BindEnv("remote.port", "DBSYNC_REMOTE_PORT")
+	v.BindEnv("remote.user", "DBSYNC_REMOTE_USER")
+	v.BindEnv("remote.password", "DBSYNC_REMOTE_PASSWORD")
+
+	v.BindEnv("local.host", "DBSYNC_LOCAL_HOST")
+	v.BindEnv("local.port", "DBSYNC_LOCAL_PORT")
+	v.BindEnv("local.user", "DBSYNC_LOCAL_USER")
+	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
+
+	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
+	v.BindEnv("dump.temp_dir", "DBSYNC_DUMP_TEMP_DIR")
+	v.BindEnv("dump.mysqldump_path", "DBSYNC_DUMP_MYSQLDUMP_PATH")
+	v.BindEnv("dump.mysql_path", "DBSYNC_DUMP_MYSQL_PATH")
+
+	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
+	v.BindEnv("cli.interactive_mode", "DBSYNC_CLI_INTERACTIVE_MODE")
+	v.BindEnv("cli.confirm_destructive", "DBSYNC_CLI_CONFIRM_DESTRUCTIVE")
+
+	v.BindEnv("log.level", "DBSYNC_LOG_LEVEL")
+	v.BindEnv("log.format", "DBSYNC_LOG_FORMAT")
+
+	// НЕ читаем файлы конфигурации в тестах
+
+	var config Config
+	if err := v.Unmarshal(&config); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Валидация конфигурации
+	if err := validate(&config); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	return &config, nil
+}
+
 // setDefaults устанавливает значения по умолчанию
 func setDefaults(v *viper.Viper) {
 	// Удаленный MySQL сервер

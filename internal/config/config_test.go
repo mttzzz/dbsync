@@ -111,9 +111,9 @@ func TestLoad(t *testing.T) {
 				os.Setenv(key, value)
 			}
 
-			got, err := Load()
+			got, err := LoadForTest()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Load() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("LoadForTest() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -229,6 +229,9 @@ func clearEnvVars() {
 	for _, envVar := range envVars {
 		os.Unsetenv(envVar)
 	}
+	
+	// Также очищаем рабочую директорию от .env файлов для тестов
+	os.Remove(".env")
 }
 
 func compareConfigs(t *testing.T, expected, got *Config) {

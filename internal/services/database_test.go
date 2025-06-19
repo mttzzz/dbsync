@@ -27,6 +27,7 @@ func TestDatabaseService_NewDatabaseService(t *testing.T) {
 	service := NewDatabaseService(cfg)
 	if service == nil {
 		t.Error("NewDatabaseService() returned nil")
+		return
 	}
 
 	if service.config != cfg {
