@@ -12,9 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"db-sync-cli/internal/version"
 )
@@ -566,50 +564,6 @@ func (u *Updater) replaceExecutable(currentPath, newPath string) error {
 	}
 
 	// Устанавливаем права доступа
-	err = os.Chmod(currentPath, 0755)
-	if err != nil {
-		return fmt.Errorf("failed to set executable permissions: %w", err)
-	}
-
-	// Удаляем временные файлы
-	os.Remove(backupPath)
-	os.Remove(tempPath)
-	return nil
-}
-
-// replaceExecutableWindows заменяет исполняемый файл на Windows
-func (u *Updater) replaceExecutableWindows(currentPath, tempPath, backupPath string) error {
-	// На Windows сначала попробуем прямую замену
-	err := os.Rename(tempPath, currentPath)
-	if err != nil {
-		// Если не получилось заменить немедленно, используем MoveFileEx
-		// с флагом MOVEFILE_DELAY_UNTIL_REBOOT
-		kernel32 := syscall.NewLazyDLL("kernel32.dll")
-		moveFileEx := kernel32.NewProc("MoveFileExW")
-
-		currentPathPtr, _ := syscall.UTF16PtrFromString(currentPath)
-		tempPathPtr, _ := syscall.UTF16PtrFromString(tempPath)
-
-		// MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
-		ret, _, err := moveFileEx.Call(
-			uintptr(unsafe.Pointer(tempPathPtr)),
-			uintptr(unsafe.Pointer(currentPathPtr)),
-			uintptr(0x4),
-		)
-
-		if ret == 0 {
-			// Восстанавливаем из резервной копии
-			u.copyFile(backupPath, currentPath)
-			os.Remove(backupPath)
-			os.Remove(tempPath)
-			return fmt.Errorf("failed to schedule file replacement: %w", err)
-		}
-
-		// Не удаляем файлы, так как замена произойдет при перезагрузке
-		return fmt.Errorf("update scheduled for next system restart - please restart your computer")
-	}
-
-	// Если замена прошла успешно, устанавливаем права доступа
 	err = os.Chmod(currentPath, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to set executable permissions: %w", err)
