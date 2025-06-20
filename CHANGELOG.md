@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2] - 2025-06-20
+
+### 🔧 Fixed
+- Fixed cross-platform compilation issues with build constraints
+- Added Unix stub for Windows-specific functions to ensure proper compilation on all platforms
+- Improved build constraint compatibility for go vet across platforms
+
 ## [1.1.1] - 2025-06-20
 
 ### 🔧 Fixed
