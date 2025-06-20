@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1] - 2025-06-20
+
+### 🔧 Fixed
+- Fixed Windows compilation issues with syscall imports
+- Improved cross-platform compatibility for the updater module
+- Added proper build constraints for Windows-specific code
+
+### 🛠️ Technical
+- Split Windows-specific updater code into separate file with build constraints
+- Updated dependencies to use golang.org/x/sys/windows instead of deprecated syscall functions
+- Added go vet and staticcheck to the testing pipeline
+
 ## [1.1.0] - 2025-06-20
 
 ### ✨ Added
