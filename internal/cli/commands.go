@@ -6,6 +6,7 @@ import (
 	"db-sync-cli/internal/config"
 	"db-sync-cli/internal/services"
 	"db-sync-cli/internal/ui"
+	"db-sync-cli/internal/updater"
 	"db-sync-cli/internal/version"
 
 	"github.com/spf13/cobra"
@@ -259,6 +260,73 @@ var versionCmd = &cobra.Command{
 	},
 }
 
+// upgradeCmd команда обновления приложения
+var upgradeCmd = &cobra.Command{
+	Use:   "upgrade",
+	Short: "Check for updates and upgrade the application",
+	Long: `Check for the latest version of dbsync on GitHub and upgrade if a newer version is available.
+This command will download and replace the current executable with the latest version.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Println(ui.InfoStyle.Render("🔍 Checking for updates..."))
+
+		up := updater.NewUpdater()
+		updateInfo, err := up.CheckForUpdates()
+		if err != nil {
+			return fmt.Errorf("failed to check for updates: %w", err)
+		}
+
+		if !updateInfo.Available {
+			fmt.Printf("✅ You are already using the latest version (%s)\n", updateInfo.CurrentVersion)
+			return nil
+		}
+
+		// Показываем информацию об обновлении
+		fmt.Printf("\n🎉 New version available!\n")
+		fmt.Printf("   Current: %s\n", updateInfo.CurrentVersion)
+		fmt.Printf("   Latest:  %s\n", updateInfo.LatestVersion)
+		fmt.Printf("   Size:    %s\n", ui.FormatSize(updateInfo.AssetSize))
+		fmt.Printf("   Released: %s\n", updateInfo.PublishedAt.Format("2006-01-02"))
+
+		// Запрашиваем подтверждение
+		checkOnly, _ := cmd.Flags().GetBool("check-only")
+		if checkOnly {
+			return nil
+		}
+
+		force, _ := cmd.Flags().GetBool("force")
+		if !force {
+			message := fmt.Sprintf("Download and install version %s?", updateInfo.LatestVersion)
+			confirmed, err := RunConfirmationSelector(message)
+			if err != nil {
+				return fmt.Errorf("confirmation failed: %w", err)
+			}
+
+			if !confirmed {
+				fmt.Printf("❌ Update cancelled by user\n")
+				return nil
+			}
+		}
+
+		// Выполняем обновление
+		fmt.Printf("\n🚀 Downloading and installing update...\n")
+		result, err := up.PerformUpdate(updateInfo)
+		if err != nil {
+			return fmt.Errorf("update failed: %w", err)
+		}
+
+		if result.Success {
+			fmt.Printf("✅ Update completed successfully!\n")
+			fmt.Printf("   Updated from %s to %s\n", result.PreviousVersion, result.NewVersion)
+			fmt.Printf("   Duration: %s\n", ui.FormatDuration(result.Duration))
+			fmt.Printf("\n💡 The application has been updated. You can continue using it immediately.\n")
+		} else {
+			return fmt.Errorf("update failed: %s", result.Error)
+		}
+
+		return nil
+	},
+}
+
 // Execute добавляет все дочерние команды к корневой команде и устанавливает флаги
 func Execute() error {
 	return rootCmd.Execute()
@@ -275,10 +343,15 @@ func init() {
 	syncCmd.Flags().Bool("dry-run", false, "show what would be done without executing")
 	syncCmd.Flags().Bool("force", false, "skip confirmation prompts for destructive operations")
 
+	// Флаги для команды upgrade
+	upgradeCmd.Flags().Bool("check-only", false, "only check for updates without installing")
+	upgradeCmd.Flags().Bool("force", false, "skip confirmation prompt for update")
+
 	// Добавляем команды
 	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(upgradeCmd)
 }

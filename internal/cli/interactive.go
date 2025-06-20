@@ -24,6 +24,9 @@ type DatabaseSelector struct {
 
 // NewDatabaseSelector создает новый селектор БД
 func NewDatabaseSelector(databases models.DatabaseList) *DatabaseSelector {
+	// Сортируем базы данных по размеру (сначала большие)
+	databases.SortBySize()
+
 	selector := &DatabaseSelector{
 		databases: databases,
 		cursor:    0,
@@ -188,6 +191,8 @@ func (m *DatabaseSelector) updateFiltered() {
 				m.filtered = append(m.filtered, db)
 			}
 		}
+		// Сортируем отфильтрованный список по размеру
+		m.filtered.SortBySize()
 	}
 
 	// Reset cursor if out of bounds

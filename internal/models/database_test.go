@@ -3,6 +3,8 @@ package models
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDatabase(t *testing.T) {
@@ -188,4 +190,87 @@ func TestDatabaseList(t *testing.T) {
 	if databases[0].Size != 1024 {
 		t.Errorf("databases[0].Size = %v, want %v", databases[0].Size, 1024)
 	}
+}
+
+func TestDatabaseList_SortBySize(t *testing.T) {
+	databases := DatabaseList{
+		{Name: "small_db", Size: 1000, Tables: 5},
+		{Name: "large_db", Size: 5000, Tables: 50},
+		{Name: "medium_db", Size: 3000, Tables: 20},
+	}
+
+	databases.SortBySize()
+
+	// Проверяем, что базы отсортированы по размеру (сначала большие)
+	assert.Equal(t, "large_db", databases[0].Name)
+	assert.Equal(t, "medium_db", databases[1].Name)
+	assert.Equal(t, "small_db", databases[2].Name)
+
+	// Проверяем размеры
+	assert.Equal(t, int64(5000), databases[0].Size)
+	assert.Equal(t, int64(3000), databases[1].Size)
+	assert.Equal(t, int64(1000), databases[2].Size)
+}
+
+func TestDatabaseList_SortBySizeAsc(t *testing.T) {
+	databases := DatabaseList{
+		{Name: "small_db", Size: 1000, Tables: 5},
+		{Name: "large_db", Size: 5000, Tables: 50},
+		{Name: "medium_db", Size: 3000, Tables: 20},
+	}
+
+	databases.SortBySizeAsc()
+
+	// Проверяем, что базы отсортированы по размеру (сначала маленькие)
+	assert.Equal(t, "small_db", databases[0].Name)
+	assert.Equal(t, "medium_db", databases[1].Name)
+	assert.Equal(t, "large_db", databases[2].Name)
+
+	// Проверяем размеры
+	assert.Equal(t, int64(1000), databases[0].Size)
+	assert.Equal(t, int64(3000), databases[1].Size)
+	assert.Equal(t, int64(5000), databases[2].Size)
+}
+
+func TestDatabaseList_SortByName(t *testing.T) {
+	databases := DatabaseList{
+		{Name: "zebra_db", Size: 1000, Tables: 5},
+		{Name: "alpha_db", Size: 5000, Tables: 50},
+		{Name: "beta_db", Size: 3000, Tables: 20},
+	}
+
+	databases.SortByName()
+
+	// Проверяем, что базы отсортированы по имени
+	assert.Equal(t, "alpha_db", databases[0].Name)
+	assert.Equal(t, "beta_db", databases[1].Name)
+	assert.Equal(t, "zebra_db", databases[2].Name)
+}
+
+func TestDatabaseList_EmptyList(t *testing.T) {
+	var databases DatabaseList
+
+	// Проверяем, что сортировка пустого списка не вызывает панику
+	assert.NotPanics(t, func() {
+		databases.SortBySize()
+	})
+
+	assert.NotPanics(t, func() {
+		databases.SortBySizeAsc()
+	})
+
+	assert.NotPanics(t, func() {
+		databases.SortByName()
+	})
+}
+
+func TestDatabaseList_SingleItem(t *testing.T) {
+	databases := DatabaseList{
+		{Name: "single_db", Size: 1000, Tables: 5},
+	}
+
+	databases.SortBySize()
+
+	assert.Len(t, databases, 1)
+	assert.Equal(t, "single_db", databases[0].Name)
 }

@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // Database представляет информацию о базе данных
 type Database struct {
@@ -12,6 +15,27 @@ type Database struct {
 
 // DatabaseList представляет список баз данных
 type DatabaseList []Database
+
+// SortBySize сортирует базы данных по размеру (сначала большие)
+func (dl DatabaseList) SortBySize() {
+	sort.Slice(dl, func(i, j int) bool {
+		return dl[i].Size > dl[j].Size
+	})
+}
+
+// SortBySizeAsc сортирует базы данных по размеру (сначала маленькие)
+func (dl DatabaseList) SortBySizeAsc() {
+	sort.Slice(dl, func(i, j int) bool {
+		return dl[i].Size < dl[j].Size
+	})
+}
+
+// SortByName сортирует базы данных по имени
+func (dl DatabaseList) SortByName() {
+	sort.Slice(dl, func(i, j int) bool {
+		return dl[i].Name < dl[j].Name
+	})
+}
 
 // ConnectionInfo содержит информацию о подключении
 type ConnectionInfo struct {
