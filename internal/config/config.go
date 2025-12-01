@@ -38,13 +38,9 @@ type MySQLConfig struct {
 
 // DumpConfig содержит настройки для создания дампов
 type DumpConfig struct {
-	Timeout time.Duration `mapstructure:"timeout"`
-
-	// MyDumper настройки
-	MyDumperImage string `mapstructure:"mydumper_image"`
-	Threads       int    `mapstructure:"threads"`
-	ChunkSize     int    `mapstructure:"chunk_size"` // Размер чанка в строках
-	Compress      bool   `mapstructure:"compress"`
+	Timeout  time.Duration `mapstructure:"timeout"`
+	Threads  int           `mapstructure:"threads"`
+	Compress bool          `mapstructure:"compress"`
 }
 
 // CLIConfig содержит настройки CLI интерфейса
@@ -86,9 +82,7 @@ func Load() (*Config, error) {
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
-	v.BindEnv("dump.mydumper_image", "DBSYNC_DUMP_MYDUMPER_IMAGE")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
-	v.BindEnv("dump.chunk_size", "DBSYNC_DUMP_CHUNK_SIZE")
 	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
@@ -140,9 +134,7 @@ func LoadForTest() (*Config, error) {
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
-	v.BindEnv("dump.mydumper_image", "DBSYNC_DUMP_MYDUMPER_IMAGE")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
-	v.BindEnv("dump.chunk_size", "DBSYNC_DUMP_CHUNK_SIZE")
 	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
@@ -183,10 +175,8 @@ func setDefaults(v *viper.Viper) {
 
 	// Настройки дампа
 	v.SetDefault("dump.timeout", "300s")
-	v.SetDefault("dump.mydumper_image", "mydumper/mydumper:latest")
 	v.SetDefault("dump.threads", 8)
-	v.SetDefault("dump.chunk_size", 100000) // 100k строк на чанк
-	v.SetDefault("dump.compress", false)
+	v.SetDefault("dump.compress", true)
 
 	// Настройки CLI
 	v.SetDefault("cli.default_charset", "utf8mb4")

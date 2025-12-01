@@ -1,5 +1,33 @@
 # Changelog
 
+## [3.0.0] - 2025-12-01
+
+### 🚀 Major Changes
+- **Switched to MySQL Shell**: Replaced mydumper with MySQL Shell for 10x faster sync
+- **No Docker required**: MySQL Shell runs natively, no container overhead
+- **Cleaner output**: Minimal, non-repetitive console output
+
+### ✨ New Features
+- **util.dump-schemas / util.load-dump**: Uses MySQL Shell's parallel dump utilities
+- **zstd compression**: 665 MB → 182 MB (3.5x compression ratio)
+- **Deferred indexes**: `--deferTableIndexes=all` for faster restore
+- **Skip consistency checks**: Works with managed MySQL (DigitalOcean, etc.)
+
+### ⚡ Performance
+- **665 MB database (63 tables, 2.3M rows)**:
+  - Dump: 19 sec
+  - Restore: 13 sec (including 11 sec for 113 indexes)
+  - **Total: ~32 sec** (was 5+ min with mydumper)
+
+### 🗑️ Removed
+- Docker dependency
+- mydumper/myloader code
+- Verbose output and warnings
+
+### 📋 Requirements
+- MySQL Shell 8.4+ (install via `winget install Oracle.MySQLShell`)
+- `SET GLOBAL local_infile = 1` on local MySQL
+
 ## [2.0.0] - 2025-12-01
 
 ### 🚀 Major Changes

@@ -2,8 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os/exec"
-	"strings"
 
 	"db-sync-cli/internal/config"
 	"db-sync-cli/internal/services"
@@ -20,44 +18,17 @@ var (
 	configFile string
 )
 
-// checkDockerAvailable проверяет доступность Docker
-func checkDockerAvailable() error {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
-	output, err := cmd.Output()
-	if err != nil {
-		return fmt.Errorf("docker is not available: please install Docker and ensure it's running: %w", err)
-	}
-	dockerVersion := strings.TrimSpace(string(output))
-	if verbose {
-		fmt.Printf("🐳 Docker version: %s\n", dockerVersion)
-	}
-	return nil
-}
-
 // rootCmd представляет основную команду
 var rootCmd = &cobra.Command{
 	Use:   "dbsync [database_name]",
 	Short: "MySQL database synchronization tool",
 	Long: `dbsync is a CLI tool for synchronizing MySQL databases between remote and local servers.
-Uses mydumper/myloader via Docker for fast parallel dump and restore operations.
+Uses MySQL Shell (mysqlsh) for fast parallel dump and restore operations.
 
 Run without arguments to launch interactive database selector.
 Or specify database name directly: dbsync my_database`,
 	Version: version.Version,
 	Args:    cobra.MaximumNArgs(1),
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Пропускаем проверку Docker для команд которые не требуют его
-		skipDockerCheck := map[string]bool{
-			"version": true,
-			"help":    true,
-			"config":  true,
-			"upgrade": true,
-		}
-		if skipDockerCheck[cmd.Name()] {
-			return nil
-		}
-		return checkDockerAvailable()
-	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -104,38 +75,14 @@ Or specify database name directly: dbsync my_database`,
 	},
 }
 
-// executeSyncOperation выполняет синхронизацию через mydumper/myloader
+// executeSyncOperation выполняет синхронизацию через MySQL Shell
 func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseService, databaseName string, dryRun bool, cmd *cobra.Command) error {
-	mydumperService := services.NewMyDumperService(cfg, dbService)
-
-	// Выполняем проверки
-	fmt.Printf("🔍 Validating operation for database '%s'...\n\n", databaseName)
-
-	if err := mydumperService.ValidateDumpOperation(databaseName); err != nil {
-		fmt.Printf("❌ Validation failed: %v\n", err)
-		return err
-	}
-
-	fmt.Println("✅ All checks passed!")
-
-	// Получаем информацию о БД
-	dbInfo, err := dbService.GetDatabaseInfo(databaseName, true)
-	if err != nil {
-		return fmt.Errorf("failed to get database info: %w", err)
-	}
-
-	fmt.Printf("\n📋 Operation Plan:\n")
-	fmt.Printf("   Database: %s\n", databaseName)
-	fmt.Printf("   Tables: %d\n", dbInfo.Tables)
-	fmt.Printf("   Threads: %d\n", cfg.Dump.Threads)
+	shellService := services.NewMySQLShellService(cfg, dbService)
 
 	if dryRun {
-		fmt.Printf("\n🧪 DRY RUN MODE - No changes will be made\n")
-		fmt.Printf("   Would dump database '%s' using mydumper with %d threads\n", databaseName, cfg.Dump.Threads)
+		fmt.Printf("🧪 DRY RUN - no changes will be made\n")
 		return nil
 	}
-
-	fmt.Printf("\n🚀 Starting synchronization...\n")
 
 	// Запрашиваем подтверждение у пользователя
 	force, _ := cmd.Flags().GetBool("force")
@@ -147,25 +94,23 @@ func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseServic
 		}
 
 		if !confirmed {
-			fmt.Printf("❌ Operation cancelled by user\n")
+			fmt.Printf("❌ Operation cancelled\n")
 			return nil
 		}
 	}
 
 	// Выполняем синхронизацию
-	syncResult, err := mydumperService.ExecuteSync(databaseName)
+	syncResult, err := shellService.ExecuteSync(databaseName)
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}
 
 	// Показываем результат
-	fmt.Printf("\n✅ Synchronization completed!\n")
-	fmt.Printf("   Database: %s\n", syncResult.DatabaseName)
-	fmt.Printf("   Duration: %s\n", ui.FormatDuration(syncResult.Duration))
-	fmt.Printf("     ├─ Dump: %s\n", ui.FormatDuration(syncResult.DumpDuration))
-	fmt.Printf("     └─ Restore: %s\n", ui.FormatDuration(syncResult.RestoreDuration))
-	fmt.Printf("   Size: %s\n", ui.FormatSize(syncResult.DumpSize))
-	fmt.Printf("   Tables: %d\n", syncResult.TablesCount)
+	fmt.Printf("\n✅ Done! %s in %s (dump: %s, restore: %s)\n",
+		ui.FormatSize(syncResult.DumpSize),
+		ui.FormatDuration(syncResult.Duration),
+		ui.FormatDuration(syncResult.DumpDuration),
+		ui.FormatDuration(syncResult.RestoreDuration))
 
 	return nil
 }
@@ -260,11 +205,9 @@ var configCmd = &cobra.Command{
 		fmt.Printf("Local MySQL: %s:%d (user: %s)\n",
 			cfg.Local.Host, cfg.Local.Port, cfg.Local.User)
 		fmt.Printf("Dump Timeout: %s\n", cfg.Dump.Timeout)
-		fmt.Printf("\n--- MyDumper Settings ---\n")
-		fmt.Printf("Docker Image: %s\n", cfg.Dump.MyDumperImage)
+		fmt.Printf("\n--- MySQL Shell Settings ---\n")
 		fmt.Printf("Threads: %d\n", cfg.Dump.Threads)
-		fmt.Printf("Chunk Size: %d rows\n", cfg.Dump.ChunkSize)
-		fmt.Printf("Compress: %v\n", cfg.Dump.Compress)
+		fmt.Printf("Compress: %v (zstd)\n", cfg.Dump.Compress)
 
 		return nil
 	},
