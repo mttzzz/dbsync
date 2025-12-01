@@ -25,7 +25,7 @@ func checkDockerAvailable() error {
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
 	output, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("Docker is not available. Please install Docker and ensure it's running.\nError: %w", err)
+		return fmt.Errorf("docker is not available: please install Docker and ensure it's running: %w", err)
 	}
 	dockerVersion := strings.TrimSpace(string(output))
 	if verbose {
