@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"db-sync-cli/internal/models"
-	"db-sync-cli/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -155,9 +154,8 @@ func (m *DatabaseSelector) View() string {
 
 		for i := start; i < end; i++ {
 			db := m.filtered[i]
-			line := fmt.Sprintf("%-30s %10s %8d tables",
+			line := fmt.Sprintf("%-40s %4d tables",
 				db.Name,
-				ui.FormatSize(db.Size),
 				db.Tables)
 
 			if i == m.cursor {

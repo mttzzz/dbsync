@@ -104,27 +104,11 @@ jobs:
     strategy:
       matrix:
         include:
-          # Linux
-          - goos: linux
-            goarch: amd64
-            platform: linux/amd64
-          - goos: linux
-            goarch: arm64
-            platform: linux/arm64
-          - goos: linux
-            goarch: 386
-            platform: linux/386
-          # Windows
+          # Windows x64
           - goos: windows
             goarch: amd64
             platform: windows/amd64
-          - goos: windows
-            goarch: 386
-            platform: windows/386
-          # macOS
-          - goos: darwin
-            goarch: amd64
-            platform: darwin/amd64
+          # macOS Apple Silicon
           - goos: darwin
             goarch: arm64
             platform: darwin/arm64

@@ -29,13 +29,12 @@ func (f *Formatter) FormatDatabaseList(databases models.DatabaseList, serverName
 	result.WriteString("\n\n")
 
 	// Подготавливаем данные для таблицы
-	headers := []string{"NAME", "SIZE", "TABLES"}
+	headers := []string{"NAME", "TABLES"}
 	rows := make([][]string, len(databases))
 
 	for i, db := range databases {
 		rows[i] = []string{
 			db.Name,
-			FormatSize(db.Size),
 			fmt.Sprintf("%d", db.Tables),
 		}
 	}
@@ -44,16 +43,14 @@ func (f *Formatter) FormatDatabaseList(databases models.DatabaseList, serverName
 	result.WriteString(RenderTable(headers, rows))
 
 	// Итого
-	totalSize := int64(0)
 	totalTables := 0
 	for _, db := range databases {
-		totalSize += db.Size
 		totalTables += db.Tables
 	}
 
 	result.WriteString("\n")
-	summary := fmt.Sprintf("Total: %d databases, %s, %d tables",
-		len(databases), FormatSize(totalSize), totalTables)
+	summary := fmt.Sprintf("Total: %d databases, %d tables",
+		len(databases), totalTables)
 	result.WriteString(MutedStyle.Render(summary))
 
 	return result.String()

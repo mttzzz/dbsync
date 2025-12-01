@@ -7,7 +7,7 @@ import (
 
 var (
 	// Эти переменные будут заполнены во время сборки через ldflags
-	Version   = "1.1.2"   // Версия приложения
+	Version   = "2.0.0"   // Версия приложения
 	GitCommit = "unknown" // Git коммит
 	BuildDate = "unknown" // Дата сборки
 	GoVersion = runtime.Version()

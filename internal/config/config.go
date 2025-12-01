@@ -38,10 +38,13 @@ type MySQLConfig struct {
 
 // DumpConfig содержит настройки для создания дампов
 type DumpConfig struct {
-	Timeout       time.Duration `mapstructure:"timeout"`
-	TempDir       string        `mapstructure:"temp_dir"`
-	MysqldumpPath string        `mapstructure:"mysqldump_path"`
-	MysqlPath     string        `mapstructure:"mysql_path"`
+	Timeout time.Duration `mapstructure:"timeout"`
+
+	// MyDumper настройки
+	MyDumperImage string `mapstructure:"mydumper_image"`
+	Threads       int    `mapstructure:"threads"`
+	ChunkSize     int    `mapstructure:"chunk_size"` // Размер чанка в строках
+	Compress      bool   `mapstructure:"compress"`
 }
 
 // CLIConfig содержит настройки CLI интерфейса
@@ -83,9 +86,10 @@ func Load() (*Config, error) {
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
-	v.BindEnv("dump.temp_dir", "DBSYNC_DUMP_TEMP_DIR")
-	v.BindEnv("dump.mysqldump_path", "DBSYNC_DUMP_MYSQLDUMP_PATH")
-	v.BindEnv("dump.mysql_path", "DBSYNC_DUMP_MYSQL_PATH")
+	v.BindEnv("dump.mydumper_image", "DBSYNC_DUMP_MYDUMPER_IMAGE")
+	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
+	v.BindEnv("dump.chunk_size", "DBSYNC_DUMP_CHUNK_SIZE")
+	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
 	v.BindEnv("cli.interactive_mode", "DBSYNC_CLI_INTERACTIVE_MODE")
@@ -136,9 +140,10 @@ func LoadForTest() (*Config, error) {
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
-	v.BindEnv("dump.temp_dir", "DBSYNC_DUMP_TEMP_DIR")
-	v.BindEnv("dump.mysqldump_path", "DBSYNC_DUMP_MYSQLDUMP_PATH")
-	v.BindEnv("dump.mysql_path", "DBSYNC_DUMP_MYSQL_PATH")
+	v.BindEnv("dump.mydumper_image", "DBSYNC_DUMP_MYDUMPER_IMAGE")
+	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
+	v.BindEnv("dump.chunk_size", "DBSYNC_DUMP_CHUNK_SIZE")
+	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
 	v.BindEnv("cli.interactive_mode", "DBSYNC_CLI_INTERACTIVE_MODE")
@@ -178,9 +183,10 @@ func setDefaults(v *viper.Viper) {
 
 	// Настройки дампа
 	v.SetDefault("dump.timeout", "300s")
-	v.SetDefault("dump.temp_dir", "./tmp")
-	v.SetDefault("dump.mysqldump_path", "mysqldump")
-	v.SetDefault("dump.mysql_path", "mysql")
+	v.SetDefault("dump.mydumper_image", "mydumper/mydumper:latest")
+	v.SetDefault("dump.threads", 8)
+	v.SetDefault("dump.chunk_size", 100000) // 100k строк на чанк
+	v.SetDefault("dump.compress", false)
 
 	// Настройки CLI
 	v.SetDefault("cli.default_charset", "utf8mb4")
@@ -206,11 +212,6 @@ func validate(config *Config) error {
 
 	if config.Local.Host == "" {
 		return fmt.Errorf("local.host is required")
-	}
-
-	// Создаем временную директорию если не существует
-	if err := os.MkdirAll(config.Dump.TempDir, 0755); err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
 	return nil
@@ -263,10 +264,10 @@ func (m MySQLConfig) GetMysqlArgs(database string) []string {
 	return args
 }
 
-// GetTempDumpPath возвращает путь для временного файла дампа
+// GetTempDumpPath возвращает путь для временного файла дампа в системной temp директории
 func (d DumpConfig) GetTempDumpPath(database string) string {
-	filename := fmt.Sprintf("%s_%d.sql", database, time.Now().Unix())
-	return filepath.Join(d.TempDir, filename)
+	filename := fmt.Sprintf("dbsync_%s_%d.sql", database, time.Now().Unix())
+	return filepath.Join(os.TempDir(), filename)
 }
 
 // loadEnvFile пытается загрузить .env файл из двух возможных местоположений

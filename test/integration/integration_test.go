@@ -34,6 +34,7 @@ func TestDatabaseService_Integration(t *testing.T) {
 		},
 		Dump: config.DumpConfig{
 			Timeout: 30 * time.Second,
+			Threads: 8,
 		},
 	}
 
@@ -90,58 +91,6 @@ func TestDatabaseService_Integration(t *testing.T) {
 			if err == nil {
 				t.Errorf("Invalid name '%s' should produce error", name)
 			}
-		}
-	})
-}
-
-// TestDumpService_Integration проверяет реальную работу с дампами
-func TestDumpService_Integration(t *testing.T) {
-	// Пропускаем если нет переменных окружения для тестирования
-	if os.Getenv("DBSYNC_TEST_REMOTE_HOST") == "" {
-		t.Skip("Integration tests require DBSYNC_TEST_REMOTE_HOST environment variable")
-	}
-
-	cfg := &config.Config{
-		Remote: config.MySQLConfig{
-			Host:     getEnvOrDefault("DBSYNC_TEST_REMOTE_HOST", "localhost"),
-			Port:     3306,
-			User:     getEnvOrDefault("DBSYNC_TEST_REMOTE_USER", "root"),
-			Password: getEnvOrDefault("DBSYNC_TEST_REMOTE_PASSWORD", ""),
-		},
-		Local: config.MySQLConfig{
-			Host:     getEnvOrDefault("DBSYNC_TEST_LOCAL_HOST", "localhost"),
-			Port:     3306,
-			User:     getEnvOrDefault("DBSYNC_TEST_LOCAL_USER", "root"),
-			Password: getEnvOrDefault("DBSYNC_TEST_LOCAL_PASSWORD", ""),
-		},
-		Dump: config.DumpConfig{
-			Timeout:       30 * time.Second,
-			MysqldumpPath: getEnvOrDefault("DBSYNC_TEST_MYSQLDUMP_PATH", "mysqldump"),
-			MysqlPath:     getEnvOrDefault("DBSYNC_TEST_MYSQL_PATH", "mysql"),
-		},
-	}
-
-	dbService := services.NewDatabaseService(cfg)
-	dumpService := services.NewDumpService(cfg, dbService)
-
-	t.Run("ValidateDumpOperation", func(t *testing.T) {
-		// Получаем список БД для тестирования
-		databases, err := dbService.ListDatabases(true)
-		if err != nil {
-			t.Fatalf("Failed to list databases: %v", err)
-		}
-
-		if len(databases) == 0 {
-			t.Skip("No databases available for testing")
-		}
-
-		// Тестируем валидацию на первой доступной БД
-		testDB := databases[0].Name
-		err = dumpService.ValidateDumpOperation(testDB)
-		if err != nil {
-			t.Logf("Validation failed for '%s': %v (это может быть нормально)", testDB, err)
-		} else {
-			t.Logf("Validation successful for database '%s'", testDB)
 		}
 	})
 }

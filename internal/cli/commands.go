@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os/exec"
+	"strings"
 
 	"db-sync-cli/internal/config"
 	"db-sync-cli/internal/services"
@@ -18,26 +20,44 @@ var (
 	configFile string
 )
 
-// rootCmd представляет основную команду
-var rootCmd = &cobra.Command{
-	Use:   "dbsync",
-	Short: "MySQL database synchronization tool",
-	Long: `dbsync is a CLI tool for synchronizing MySQL databases between remote and local servers.
-It creates dumps from remote databases and restores them to local instances with progress tracking.`,
-	Version: version.Version,
+// checkDockerAvailable проверяет доступность Docker
+func checkDockerAvailable() error {
+	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("Docker is not available. Please install Docker and ensure it's running.\nError: %w", err)
+	}
+	dockerVersion := strings.TrimSpace(string(output))
+	if verbose {
+		fmt.Printf("🐳 Docker version: %s\n", dockerVersion)
+	}
+	return nil
 }
 
-// syncCmd команда синхронизации
-var syncCmd = &cobra.Command{
-	Use:   "sync [database_name]",
-	Short: "Synchronize a database from remote to local",
-	Long: `Synchronize a specific database from remote server to local server.
-If database name is not provided, an interactive selection will be shown.
+// rootCmd представляет основную команду
+var rootCmd = &cobra.Command{
+	Use:   "dbsync [database_name]",
+	Short: "MySQL database synchronization tool",
+	Long: `dbsync is a CLI tool for synchronizing MySQL databases between remote and local servers.
+Uses mydumper/myloader via Docker for fast parallel dump and restore operations.
 
-Available flags:
-  --dry-run   Show what would be done without making changes
-  --force     Skip confirmation prompts for destructive operations`,
-	Args: cobra.MaximumNArgs(1),
+Run without arguments to launch interactive database selector.
+Or specify database name directly: dbsync my_database`,
+	Version: version.Version,
+	Args:    cobra.MaximumNArgs(1),
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Пропускаем проверку Docker для команд которые не требуют его
+		skipDockerCheck := map[string]bool{
+			"version": true,
+			"help":    true,
+			"config":  true,
+			"upgrade": true,
+		}
+		if skipDockerCheck[cmd.Name()] {
+			return nil
+		}
+		return checkDockerAvailable()
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
@@ -46,9 +66,14 @@ Available flags:
 
 		// Получаем флаги
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		threads, _ := cmd.Flags().GetInt("threads")
+
+		// Обновляем конфиг если указаны флаги
+		if threads > 0 {
+			cfg.Dump.Threads = threads
+		}
 
 		dbService := services.NewDatabaseService(cfg)
-		dumpService := services.NewDumpService(cfg, dbService)
 
 		var databaseName string
 
@@ -75,82 +100,74 @@ Available flags:
 			databaseName = args[0]
 		}
 
-		// Выполняем проверки безопасности
-		fmt.Printf("🔍 Running safety checks for database '%s'...\n\n", databaseName)
+		return executeSyncOperation(cfg, dbService, databaseName, dryRun, cmd)
+	},
+}
 
-		checks, err := dumpService.GetSafetyChecks(databaseName)
-		for _, check := range checks {
-			fmt.Println(check)
-		}
+// executeSyncOperation выполняет синхронизацию через mydumper/myloader
+func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseService, databaseName string, dryRun bool, cmd *cobra.Command) error {
+	mydumperService := services.NewMyDumperService(cfg, dbService)
 
+	// Выполняем проверки
+	fmt.Printf("🔍 Validating operation for database '%s'...\n\n", databaseName)
+
+	if err := mydumperService.ValidateDumpOperation(databaseName); err != nil {
+		fmt.Printf("❌ Validation failed: %v\n", err)
+		return err
+	}
+
+	fmt.Println("✅ All checks passed!")
+
+	// Получаем информацию о БД
+	dbInfo, err := dbService.GetDatabaseInfo(databaseName, true)
+	if err != nil {
+		return fmt.Errorf("failed to get database info: %w", err)
+	}
+
+	fmt.Printf("\n📋 Operation Plan:\n")
+	fmt.Printf("   Database: %s\n", databaseName)
+	fmt.Printf("   Tables: %d\n", dbInfo.Tables)
+	fmt.Printf("   Threads: %d\n", cfg.Dump.Threads)
+
+	if dryRun {
+		fmt.Printf("\n🧪 DRY RUN MODE - No changes will be made\n")
+		fmt.Printf("   Would dump database '%s' using mydumper with %d threads\n", databaseName, cfg.Dump.Threads)
+		return nil
+	}
+
+	fmt.Printf("\n🚀 Starting synchronization...\n")
+
+	// Запрашиваем подтверждение у пользователя
+	force, _ := cmd.Flags().GetBool("force")
+	if !force {
+		message := fmt.Sprintf("This will replace the local database '%s'", databaseName)
+		confirmed, err := RunConfirmationSelector(message)
 		if err != nil {
-			fmt.Printf("\n❌ Safety checks failed: %v\n", err)
-			return err
+			return fmt.Errorf("confirmation failed: %w", err)
 		}
 
-		fmt.Println("\n✅ All safety checks passed!")
-
-		// Показываем план операции
-		result, err := dumpService.PlanDumpOperation(databaseName)
-		if err != nil {
-			return fmt.Errorf("failed to plan operation: %w", err)
-		}
-
-		fmt.Printf("\n📋 Operation Plan:\n")
-		fmt.Printf("   Database: %s\n", result.DatabaseName)
-		fmt.Printf("   Size: %s\n", ui.FormatSize(result.DumpSize))
-		fmt.Printf("   Tables: %d\n", result.TablesCount)
-
-		if dryRun {
-			fmt.Printf("\n🧪 DRY RUN MODE - No changes will be made\n")
-			fmt.Printf("   %s\n", result.Error)
-
-			// Показываем команды которые будут выполнены
-			fmt.Printf("\n📝 Commands that would be executed:\n")
-			dumpCmd := dumpService.GetDumpCommand(databaseName)
-			fmt.Printf("   Dump: %s\n", dumpCmd[0])
-
-			restoreCmd := dumpService.GetRestoreCommand(databaseName)
-			fmt.Printf("   Restore: %s\n", restoreCmd[0])
-
+		if !confirmed {
+			fmt.Printf("❌ Operation cancelled by user\n")
 			return nil
 		}
+	}
 
-		// Реальная синхронизация
-		fmt.Printf("\n🚀 Starting synchronization...\n")
+	// Выполняем синхронизацию
+	syncResult, err := mydumperService.ExecuteSync(databaseName)
+	if err != nil {
+		return fmt.Errorf("sync failed: %w", err)
+	}
 
-		// Запрашиваем подтверждение у пользователя
-		force, _ := cmd.Flags().GetBool("force")
-		if !force {
-			message := fmt.Sprintf("This will replace the local database '%s'", databaseName)
-			confirmed, err := RunConfirmationSelector(message)
-			if err != nil {
-				return fmt.Errorf("confirmation failed: %w", err)
-			}
+	// Показываем результат
+	fmt.Printf("\n✅ Synchronization completed!\n")
+	fmt.Printf("   Database: %s\n", syncResult.DatabaseName)
+	fmt.Printf("   Duration: %s\n", ui.FormatDuration(syncResult.Duration))
+	fmt.Printf("     ├─ Dump: %s\n", ui.FormatDuration(syncResult.DumpDuration))
+	fmt.Printf("     └─ Restore: %s\n", ui.FormatDuration(syncResult.RestoreDuration))
+	fmt.Printf("   Size: %s\n", ui.FormatSize(syncResult.DumpSize))
+	fmt.Printf("   Tables: %d\n", syncResult.TablesCount)
 
-			if !confirmed {
-				fmt.Printf("❌ Operation cancelled by user\n")
-				return nil
-			}
-		}
-
-		// Выполняем синхронизацию
-		syncResult, err := dumpService.ExecuteSync(databaseName)
-		if err != nil {
-			return fmt.Errorf("sync failed: %w", err)
-		}
-
-		// Показываем результат
-		fmt.Printf("\n✅ Synchronization completed successfully!\n")
-		fmt.Printf("   Database: %s\n", syncResult.DatabaseName)
-		fmt.Printf("   Total Duration: %s\n", ui.FormatDuration(syncResult.Duration))
-		fmt.Printf("     ├─ Dump: %s\n", ui.FormatDuration(syncResult.DumpDuration))
-		fmt.Printf("     └─ Restore: %s\n", ui.FormatDuration(syncResult.RestoreDuration))
-		fmt.Printf("   Size: %s\n", ui.FormatSize(syncResult.DumpSize))
-		fmt.Printf("   Tables: %d\n", syncResult.TablesCount)
-
-		return nil
-	},
+	return nil
 }
 
 // listCmd команда получения списка БД
@@ -242,8 +259,12 @@ var configCmd = &cobra.Command{
 			cfg.Remote.Host, cfg.Remote.Port, cfg.Remote.User)
 		fmt.Printf("Local MySQL: %s:%d (user: %s)\n",
 			cfg.Local.Host, cfg.Local.Port, cfg.Local.User)
-		fmt.Printf("Temp Directory: %s\n", cfg.Dump.TempDir)
 		fmt.Printf("Dump Timeout: %s\n", cfg.Dump.Timeout)
+		fmt.Printf("\n--- MyDumper Settings ---\n")
+		fmt.Printf("Docker Image: %s\n", cfg.Dump.MyDumperImage)
+		fmt.Printf("Threads: %d\n", cfg.Dump.Threads)
+		fmt.Printf("Chunk Size: %d rows\n", cfg.Dump.ChunkSize)
+		fmt.Printf("Compress: %v\n", cfg.Dump.Compress)
 
 		return nil
 	},
@@ -337,18 +358,16 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", "config file (default is .env)")
 
-	// Флаги для команды sync
-	syncCmd.Flags().String("remote-host", "", "remote MySQL host (overrides config)")
-	syncCmd.Flags().String("local-host", "", "local MySQL host (overrides config)")
-	syncCmd.Flags().Bool("dry-run", false, "show what would be done without executing")
-	syncCmd.Flags().Bool("force", false, "skip confirmation prompts for destructive operations")
+	// Флаги для синхронизации (теперь в rootCmd)
+	rootCmd.Flags().Bool("dry-run", false, "show what would be done without executing")
+	rootCmd.Flags().Bool("force", false, "skip confirmation prompts for destructive operations")
+	rootCmd.Flags().Int("threads", 8, "number of threads for parallel dump/restore")
 
 	// Флаги для команды upgrade
 	upgradeCmd.Flags().Bool("check-only", false, "only check for updates without installing")
 	upgradeCmd.Flags().Bool("force", false, "skip confirmation prompt for update")
 
 	// Добавляем команды
-	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(configCmd)

@@ -37,7 +37,7 @@ func TestFormatDatabaseList(t *testing.T) {
 				{Name: "test_db", Size: 1024, Tables: 5},
 			},
 			serverName:   "remote",
-			expectedText: []string{"Available databases on remote", "test_db", "1.0 KB", "5"},
+			expectedText: []string{"Available databases on remote", "test_db", "5"},
 		},
 		{
 			name: "multiple databases",
@@ -46,7 +46,7 @@ func TestFormatDatabaseList(t *testing.T) {
 				{Name: "db2", Size: 2048, Tables: 7},
 			},
 			serverName:   "production",
-			expectedText: []string{"Available databases on production", "db1", "db2", "1.0 KB", "2.0 KB"},
+			expectedText: []string{"Available databases on production", "db1", "db2"},
 		},
 	}
 
