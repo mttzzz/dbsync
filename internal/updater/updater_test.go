@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -72,16 +73,19 @@ func TestUpdater_CheckForUpdates(t *testing.T) {
 	})
 
 	t.Run("findAssetForCurrentPlatform", func(t *testing.T) {
+		currentPlatformAsset := "dbsync-" + runtime.GOOS + "-" + runtime.GOARCH + ".zip"
 		assets := []GitHubAsset{
 			{Name: "dbsync-windows-amd64.zip", BrowserDownloadURL: "url1", Size: 1000},
 			{Name: "dbsync-linux-amd64.zip", BrowserDownloadURL: "url2", Size: 1000},
 			{Name: "dbsync-darwin-amd64.zip", BrowserDownloadURL: "url3", Size: 1000},
+			{Name: currentPlatformAsset, BrowserDownloadURL: "url4", Size: 1000},
 		}
 
 		asset, err := updater.findAssetForCurrentPlatform(assets)
 		require.NoError(t, err)
 		assert.NotNil(t, asset)
-		assert.Contains(t, asset.Name, "amd64") // Предполагаем amd64 архитектуру
+		assert.Contains(t, asset.Name, runtime.GOOS)
+		assert.Contains(t, asset.Name, runtime.GOARCH)
 	})
 }
 

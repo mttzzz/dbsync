@@ -96,8 +96,12 @@ func (f *Formatter) FormatSyncPlan(db *models.Database, willReplace bool, dryRun
 	result.WriteString("\n\n")
 
 	// Информация о БД
-	dbInfo := fmt.Sprintf("Database: %s\nSize: %s\nTables: %d",
-		db.Name, FormatSize(db.Size), db.Tables)
+	displaySize := db.Size
+	if db.DataSize > 0 {
+		displaySize = db.DataSize
+	}
+	dbInfo := fmt.Sprintf("Database: %s\nSource data estimate: %s\nTables: %d",
+		db.Name, FormatSize(displaySize), db.Tables)
 	result.WriteString(RenderBox("Database Information", dbInfo))
 	result.WriteString("\n")
 
@@ -107,14 +111,14 @@ func (f *Formatter) FormatSyncPlan(db *models.Database, willReplace bool, dryRun
 		operation = fmt.Sprintf("⚠️  Local database '%s' will be REPLACED", db.Name)
 		if dryRun {
 			operation = fmt.Sprintf("DRY RUN: Would replace local database '%s' with %d tables (%s)",
-				db.Name, db.Tables, FormatSize(db.Size))
+				db.Name, db.Tables, FormatSize(displaySize))
 		}
 		result.WriteString(WarningStyle.Render(operation))
 	} else {
 		operation = fmt.Sprintf("✅ Local database '%s' will be created", db.Name)
 		if dryRun {
 			operation = fmt.Sprintf("DRY RUN: Would create local database '%s' with %d tables (%s)",
-				db.Name, db.Tables, FormatSize(db.Size))
+				db.Name, db.Tables, FormatSize(displaySize))
 		}
 		result.WriteString(SuccessStyle.Render(operation))
 	}
@@ -199,10 +203,49 @@ func (f *Formatter) FormatSyncResult(result *models.SyncResult) string {
 
 	if result.Success {
 		// Статистика
-		stats := fmt.Sprintf("Duration: %s\nDump size: %s\nTables: %d",
-			FormatDuration(result.Duration),
-			FormatSize(result.DumpSize),
-			result.TablesCount)
+		statsLines := []string{
+			fmt.Sprintf("Duration: %s", FormatDuration(result.Duration)),
+			fmt.Sprintf("Tables: %d", result.TablesCount),
+		}
+		if result.Traffic.DownloadedBytes() > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Downloaded from remote: %s", FormatSize(result.Traffic.DownloadedBytes())))
+		}
+		if result.DumpDuration > 0 && result.Traffic.DownloadedBytes() > 0 {
+			bytesPerSecond := float64(result.Traffic.DownloadedBytes()) / result.DumpDuration.Seconds()
+			if bytesPerSecond > 0 {
+				statsLines = append(statsLines, fmt.Sprintf("Average dump speed: %s/s", FormatSize(int64(bytesPerSecond))))
+			}
+		}
+		if result.DumpDuration > 0 || result.RestoreDuration > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Dump phase: %s", FormatDuration(result.DumpDuration)))
+			statsLines = append(statsLines, fmt.Sprintf("Restore phase: %s", FormatDuration(result.RestoreDuration)))
+		}
+		if result.LogicalSize > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Source data estimate: %s", FormatSize(result.LogicalSize)))
+		}
+		if result.IndexSize > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Source index estimate: %s", FormatSize(result.IndexSize)))
+		}
+		if result.DumpSizeOnDisk > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Compressed dump on disk: %s", FormatSize(result.DumpSizeOnDisk)))
+		} else if result.DumpSize > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Dump size: %s", FormatSize(result.DumpSize)))
+		}
+		if result.Traffic.TotalBytes() > 0 {
+			statsLines = append(statsLines,
+				fmt.Sprintf("Uploaded control traffic: %s", FormatSize(result.Traffic.UploadedBytes())),
+				fmt.Sprintf("Total network I/O: %s", FormatSize(result.Traffic.TotalBytes())),
+				fmt.Sprintf("Transport: %s", strings.ToUpper(string(result.TransportMode))),
+			)
+		}
+		if result.IndexSize > 0 {
+			statsLines = append(statsLines, "Source index estimate is storage context, not a network metric.")
+		}
+		if result.CompressionRatio > 0 {
+			statsLines = append(statsLines, fmt.Sprintf("Compression ratio: %.2fx", result.CompressionRatio))
+		}
+
+		stats := strings.Join(statsLines, "\n")
 		output.WriteString("\n")
 		output.WriteString(RenderBox("Sync Statistics", stats))
 	}

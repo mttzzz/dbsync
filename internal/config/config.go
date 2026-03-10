@@ -41,10 +41,14 @@ type MySQLConfig struct {
 
 // DumpConfig содержит настройки для создания дампов
 type DumpConfig struct {
-	Timeout  time.Duration `mapstructure:"timeout"`
-	Threads  int           `mapstructure:"threads"`
-	Compress bool          `mapstructure:"compress"`
+	Timeout          time.Duration `mapstructure:"timeout"`
+	Threads          int           `mapstructure:"threads"`
+	Compress         bool          `mapstructure:"compress"`
+	NetworkCompress  bool          `mapstructure:"network_compress"`
+	NetworkZstdLevel int           `mapstructure:"network_zstd_level"`
 }
+
+const defaultDumpNetworkZstdLevel = 7
 
 // CLIConfig содержит настройки CLI интерфейса
 type CLIConfig struct {
@@ -89,6 +93,8 @@ func Load() (*Config, error) {
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
 	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
+	v.BindEnv("dump.network_compress", "DBSYNC_DUMP_NETWORK_COMPRESS")
+	v.BindEnv("dump.network_zstd_level", "DBSYNC_DUMP_NETWORK_ZSTD_LEVEL")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
 	v.BindEnv("cli.interactive_mode", "DBSYNC_CLI_INTERACTIVE_MODE")
@@ -143,6 +149,8 @@ func LoadForTest() (*Config, error) {
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
 	v.BindEnv("dump.compress", "DBSYNC_DUMP_COMPRESS")
+	v.BindEnv("dump.network_compress", "DBSYNC_DUMP_NETWORK_COMPRESS")
+	v.BindEnv("dump.network_zstd_level", "DBSYNC_DUMP_NETWORK_ZSTD_LEVEL")
 
 	v.BindEnv("cli.default_charset", "DBSYNC_CLI_DEFAULT_CHARSET")
 	v.BindEnv("cli.interactive_mode", "DBSYNC_CLI_INTERACTIVE_MODE")
@@ -186,6 +194,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("dump.timeout", "300s")
 	v.SetDefault("dump.threads", 8)
 	v.SetDefault("dump.compress", true)
+	v.SetDefault("dump.network_compress", true)
+	v.SetDefault("dump.network_zstd_level", 7)
 
 	// Настройки CLI
 	v.SetDefault("cli.default_charset", "utf8mb4")
@@ -204,6 +214,8 @@ func (c *Config) Validate() error {
 
 // validate валидирует конфигурацию
 func validate(config *Config) error {
+	normalizeDumpConfig(&config.Dump)
+
 	// Проверяем обязательные поля
 	if config.Remote.Host == "" {
 		return fmt.Errorf("remote.host is required")
@@ -221,7 +233,17 @@ func validate(config *Config) error {
 		return err
 	}
 
+	if config.Dump.NetworkZstdLevel < 1 || config.Dump.NetworkZstdLevel > 22 {
+		return fmt.Errorf("dump.network_zstd_level must be between 1 and 22")
+	}
+
 	return nil
+}
+
+func normalizeDumpConfig(dump *DumpConfig) {
+	if dump.NetworkZstdLevel == 0 {
+		dump.NetworkZstdLevel = defaultDumpNetworkZstdLevel
+	}
 }
 
 func validateProxyURL(fieldName string, raw string) error {

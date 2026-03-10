@@ -7,24 +7,30 @@ import (
 // MockDatabaseService provides a mock implementation of DatabaseServiceInterface
 type MockDatabaseService struct {
 	// Поля для управления поведением моков
-	TestConnectionError  error
-	ListDatabasesError   error
-	ValidateNameError    error
-	DatabaseExistsError  error
-	GetDatabaseInfoError error
+	TestConnectionError   error
+	ListDatabasesError    error
+	ListTablesError       error
+	ListDependenciesError error
+	ValidateNameError     error
+	DatabaseExistsError   error
+	GetDatabaseInfoError  error
 
 	RemoteConnInfo       *models.ConnectionInfo
 	LocalConnInfo        *models.ConnectionInfo
 	DatabaseList         models.DatabaseList
+	TableList            []models.Table
+	TableDependencies    []models.TableDependency
 	DatabaseExistsResult bool
 	DatabaseInfo         *models.Database
 
 	// Поля для отслеживания вызовов
-	TestConnectionCalled  bool
-	ListDatabasesCalled   bool
-	ValidateNameCalled    bool
-	DatabaseExistsCalled  bool
-	GetDatabaseInfoCalled bool
+	TestConnectionCalled   bool
+	ListDatabasesCalled    bool
+	ListTablesCalled       bool
+	ListDependenciesCalled bool
+	ValidateNameCalled     bool
+	DatabaseExistsCalled   bool
+	GetDatabaseInfoCalled  bool
 
 	LastIsRemote      bool
 	LastDatabaseName  string
@@ -77,6 +83,54 @@ func (m *MockDatabaseService) ListDatabases(isRemote bool) (models.DatabaseList,
 	}, nil
 }
 
+// ListTables имитирует получение списка таблиц.
+func (m *MockDatabaseService) ListTables(databaseName string, isRemote bool) ([]models.Table, error) {
+	m.ListTablesCalled = true
+	m.LastDatabaseName = databaseName
+	m.LastIsRemote = isRemote
+
+	if m.ListTablesError != nil {
+		return nil, m.ListTablesError
+	}
+
+	if len(m.TableList) > 0 {
+		return m.TableList, nil
+	}
+
+	return []models.Table{
+		{DatabaseName: databaseName, Name: "users", Size: 1024, Rows: 10, Engine: "InnoDB"},
+		{DatabaseName: databaseName, Name: "orders", Size: 2048, Rows: 25, Engine: "InnoDB"},
+	}, nil
+}
+
+// ListTableDependencies имитирует получение зависимостей таблиц.
+func (m *MockDatabaseService) ListTableDependencies(databaseName string, tableNames []string, isRemote bool) ([]models.TableDependency, error) {
+	m.ListDependenciesCalled = true
+	m.LastDatabaseName = databaseName
+	m.LastIsRemote = isRemote
+
+	if m.ListDependenciesError != nil {
+		return nil, m.ListDependenciesError
+	}
+
+	if len(m.TableDependencies) > 0 {
+		return m.TableDependencies, nil
+	}
+
+	if len(tableNames) == 0 {
+		return nil, nil
+	}
+
+	return []models.TableDependency{
+		{
+			DatabaseName:    databaseName,
+			TableName:       tableNames[0],
+			ReferencedTable: "users",
+			ConstraintName:  tableNames[0] + "_users_fk",
+		},
+	}, nil
+}
+
 // ValidateDatabaseName имитирует валидацию имени базы данных
 func (m *MockDatabaseService) ValidateDatabaseName(name string) error {
 	m.ValidateNameCalled = true
@@ -123,16 +177,22 @@ func (m *MockDatabaseService) GetDatabaseInfo(name string, isRemote bool) (*mode
 func (m *MockDatabaseService) Reset() {
 	m.TestConnectionError = nil
 	m.ListDatabasesError = nil
+	m.ListTablesError = nil
+	m.ListDependenciesError = nil
 	m.ValidateNameError = nil
 	m.DatabaseExistsError = nil
 	m.GetDatabaseInfoError = nil
 	m.RemoteConnInfo = nil
 	m.LocalConnInfo = nil
 	m.DatabaseList = models.DatabaseList{}
+	m.TableList = nil
+	m.TableDependencies = nil
 	m.DatabaseExistsResult = false
 	m.DatabaseInfo = nil
 	m.TestConnectionCalled = false
 	m.ListDatabasesCalled = false
+	m.ListTablesCalled = false
+	m.ListDependenciesCalled = false
 	m.ValidateNameCalled = false
 	m.DatabaseExistsCalled = false
 	m.GetDatabaseInfoCalled = false

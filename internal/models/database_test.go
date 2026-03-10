@@ -82,12 +82,14 @@ func TestSyncOptions(t *testing.T) {
 		{
 			name: "sync options with dry run",
 			options: SyncOptions{
-				DatabaseName: "test_db",
-				DryRun:       true,
-				Force:        false,
-				Verbose:      true,
-				RemoteHost:   "remote.example.com",
-				LocalHost:    "localhost",
+				DatabaseName:   "test_db",
+				DryRun:         true,
+				Force:          false,
+				Verbose:        true,
+				RemoteHost:     "remote.example.com",
+				LocalHost:      "localhost",
+				SelectedTables: []string{"users", "orders"},
+				Runtime:        RuntimeOptions{DryRun: true, Threads: 8},
 			},
 			wantDB:  "test_db",
 			wantDry: true,
@@ -101,6 +103,7 @@ func TestSyncOptions(t *testing.T) {
 				Verbose:      false,
 				RemoteHost:   "prod.example.com",
 				LocalHost:    "local.example.com",
+				Runtime:      RuntimeOptions{Force: true, Threads: 16},
 			},
 			wantDB:  "production_db",
 			wantDry: false,
@@ -114,6 +117,9 @@ func TestSyncOptions(t *testing.T) {
 			}
 			if tt.options.DryRun != tt.wantDry {
 				t.Errorf("SyncOptions.DryRun = %v, want %v", tt.options.DryRun, tt.wantDry)
+			}
+			if tt.options.DryRun != tt.options.Runtime.DryRun {
+				t.Errorf("SyncOptions runtime dry-run mismatch: option=%v runtime=%v", tt.options.DryRun, tt.options.Runtime.DryRun)
 			}
 		})
 	}
@@ -132,13 +138,17 @@ func TestSyncResult(t *testing.T) {
 		{
 			name: "successful sync",
 			result: SyncResult{
-				Success:      true,
-				DatabaseName: "test_db",
-				Duration:     5 * time.Minute,
-				DumpSize:     1024000,
-				TablesCount:  10,
-				StartTime:    startTime,
-				EndTime:      endTime,
+				Success:          true,
+				DatabaseName:     "test_db",
+				Duration:         5 * time.Minute,
+				DumpSize:         1024000,
+				TablesCount:      10,
+				SelectedTables:   []string{"users", "orders"},
+				TransportMode:    TransportModeProxy,
+				CompressionRatio: 2.5,
+				Traffic:          TrafficMetrics{Mode: TransportModeProxy, BytesIn: 2048, BytesOut: 4096},
+				StartTime:        startTime,
+				EndTime:          endTime,
 			},
 			wantSuccess: true,
 			wantDB:      "test_db",
@@ -170,6 +180,36 @@ func TestSyncResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSyncTarget_EffectiveTables(t *testing.T) {
+	target := SyncTarget{
+		DatabaseName:       "kp_modmb_com",
+		SelectedTables:     []string{"orders", "users"},
+		AutoIncludedTables: []string{"users", "products"},
+	}
+
+	assert.Equal(t, []string{"orders", "users", "products"}, target.EffectiveTables())
+	assert.True(t, target.UsesTableSelection())
+}
+
+func TestTrafficMetrics_TotalBytes(t *testing.T) {
+	metrics := TrafficMetrics{BytesIn: 1500, BytesOut: 500}
+	assert.Equal(t, int64(2000), metrics.TotalBytes())
+}
+
+func TestSyncResult_DurationOrZero(t *testing.T) {
+	result := SyncResult{StartTime: startTimeFromUnix(10), EndTime: startTimeFromUnix(25)}
+	assert.Equal(t, 15*time.Second, result.DurationOrZero())
+}
+
+func TestProgressSnapshot_HasETA(t *testing.T) {
+	assert.True(t, ProgressSnapshot{ETA: 3 * time.Second}.HasETA())
+	assert.False(t, ProgressSnapshot{}.HasETA())
+}
+
+func startTimeFromUnix(value int64) time.Time {
+	return time.Unix(value, 0)
 }
 
 func TestDatabaseList(t *testing.T) {

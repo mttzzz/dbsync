@@ -13,17 +13,22 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"db-sync-cli/internal/config"
+	"db-sync-cli/internal/models"
 
 	"golang.org/x/net/proxy"
 )
 
 type proxyTunnel struct {
-	listener net.Listener
-	proxyURL *url.URL
-	target   string
+	listener  net.Listener
+	proxyURL  *url.URL
+	target    string
+	startedAt time.Time
+	bytesIn   atomic.Int64
+	bytesOut  atomic.Int64
 
 	closeOnce sync.Once
 }
@@ -38,9 +43,15 @@ func (c *bufferedConn) Read(p []byte) (int, error) {
 }
 
 func newProxyTunnel(mysqlConfig config.MySQLConfig) (*proxyTunnel, error) {
-	proxyURL, err := url.Parse(mysqlConfig.ProxyURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse proxy URL: %w", err)
+	var (
+		proxyURL *url.URL
+		err      error
+	)
+	if mysqlConfig.HasProxy() {
+		proxyURL, err = url.Parse(mysqlConfig.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse proxy URL: %w", err)
+		}
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -49,9 +60,10 @@ func newProxyTunnel(mysqlConfig config.MySQLConfig) (*proxyTunnel, error) {
 	}
 
 	tunnel := &proxyTunnel{
-		listener: listener,
-		proxyURL: proxyURL,
-		target:   net.JoinHostPort(mysqlConfig.Host, strconv.Itoa(mysqlConfig.Port)),
+		listener:  listener,
+		proxyURL:  proxyURL,
+		target:    net.JoinHostPort(mysqlConfig.Host, strconv.Itoa(mysqlConfig.Port)),
+		startedAt: time.Now(),
 	}
 
 	go tunnel.serve()
@@ -91,6 +103,27 @@ func (t *proxyTunnel) Close() error {
 	return closeErr
 }
 
+func (t *proxyTunnel) TransportMode() models.TransportMode {
+	if t.proxyURL != nil {
+		return models.TransportModeProxy
+	}
+	return models.TransportModeDirect
+}
+
+func (t *proxyTunnel) Metrics() models.TrafficMetrics {
+	duration := time.Since(t.startedAt)
+	metrics := models.TrafficMetrics{
+		Mode:         t.TransportMode(),
+		BytesIn:      t.bytesIn.Load(),
+		BytesOut:     t.bytesOut.Load(),
+		SampleWindow: duration,
+	}
+	if duration > 0 {
+		metrics.AverageBytesPerSecond = float64(metrics.TotalBytes()) / duration.Seconds()
+	}
+	return metrics
+}
+
 func (t *proxyTunnel) serve() {
 	for {
 		clientConn, err := t.listener.Accept()
@@ -112,10 +145,14 @@ func (t *proxyTunnel) handle(clientConn net.Conn) {
 		return
 	}
 
-	proxyConnections(clientConn, upstreamConn)
+	proxyConnectionsWithCounters(clientConn, upstreamConn, &t.bytesIn, &t.bytesOut)
 }
 
 func (t *proxyTunnel) dialTarget() (net.Conn, error) {
+	if t.proxyURL == nil {
+		return t.dialDirect()
+	}
+
 	switch strings.ToLower(t.proxyURL.Scheme) {
 	case "socks5", "socks5h":
 		return t.dialSOCKS5()
@@ -124,6 +161,15 @@ func (t *proxyTunnel) dialTarget() (net.Conn, error) {
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", t.proxyURL.Scheme)
 	}
+}
+
+func (t *proxyTunnel) dialDirect() (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "tcp", t.target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect directly to target: %w", err)
+	}
+	return conn, nil
 }
 
 func (t *proxyTunnel) dialSOCKS5() (net.Conn, error) {
@@ -199,6 +245,10 @@ func (t *proxyTunnel) dialHTTPConnect() (net.Conn, error) {
 }
 
 func proxyConnections(clientConn net.Conn, upstreamConn net.Conn) {
+	proxyConnectionsWithCounters(clientConn, upstreamConn, nil, nil)
+}
+
+func proxyConnectionsWithCounters(clientConn net.Conn, upstreamConn net.Conn, bytesIn *atomic.Int64, bytesOut *atomic.Int64) {
 	var closeOnce sync.Once
 	closeBoth := func() {
 		closeOnce.Do(func() {
@@ -210,19 +260,37 @@ func proxyConnections(clientConn net.Conn, upstreamConn net.Conn) {
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(2)
 
+	if bytesIn == nil {
+		bytesIn = &atomic.Int64{}
+	}
+	if bytesOut == nil {
+		bytesOut = &atomic.Int64{}
+	}
+
 	go func() {
 		defer waitGroup.Done()
-		_, _ = io.Copy(upstreamConn, clientConn)
+		_, _ = io.Copy(io.MultiWriter(upstreamConn, &countingWriter{counter: bytesOut}), clientConn)
 		closeBoth()
 	}()
 
 	go func() {
 		defer waitGroup.Done()
-		_, _ = io.Copy(clientConn, upstreamConn)
+		_, _ = io.Copy(clientConn, io.TeeReader(upstreamConn, &countingWriter{counter: bytesIn}))
 		closeBoth()
 	}()
 
 	waitGroup.Wait()
+}
+
+type countingWriter struct {
+	counter *atomic.Int64
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	if w.counter != nil {
+		w.counter.Add(int64(len(p)))
+	}
+	return len(p), nil
 }
 
 func isListenerClosed(err error) bool {

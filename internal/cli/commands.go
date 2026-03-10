@@ -5,6 +5,7 @@ import (
 
 	"db-sync-cli/internal/config"
 	"db-sync-cli/internal/services"
+	"db-sync-cli/internal/tui"
 	"db-sync-cli/internal/ui"
 	"db-sync-cli/internal/updater"
 	"db-sync-cli/internal/version"
@@ -20,23 +21,20 @@ var (
 
 // rootCmd представляет основную команду
 var rootCmd = &cobra.Command{
-	Use:   "dbsync [database_name]",
+	Use:   "dbsync",
 	Short: "MySQL database synchronization tool",
 	Long: `dbsync is a CLI tool for synchronizing MySQL databases between remote and local servers.
 Uses MySQL Shell (mysqlsh) for fast parallel dump and restore operations.
 
-Run without arguments to launch interactive database selector.
-Or specify database name directly: dbsync my_database`,
+	Run without arguments to launch the terminal UI and manage sync from there.`,
 	Version: version.Version,
-	Args:    cobra.MaximumNArgs(1),
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := config.Load()
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		// Получаем флаги
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		threads, _ := cmd.Flags().GetInt("threads")
 
 		// Обновляем конфиг если указаны флаги
@@ -45,39 +43,35 @@ Or specify database name directly: dbsync my_database`,
 		}
 
 		dbService := services.NewDatabaseService(cfg)
-
-		var databaseName string
-
-		// Если имя БД не указано, показываем интерактивный выбор
-		if len(args) == 0 {
-			databases, err := dbService.ListDatabases(true)
-			if err != nil {
-				return fmt.Errorf("failed to list databases: %w", err)
-			}
-
-			if len(databases) == 0 {
-				fmt.Println("No databases found on remote server")
-				return nil
-			}
-
-			// Запускаем интерактивный селектор
-			selected, err := RunDatabaseSelector(databases)
-			if err != nil {
-				return fmt.Errorf("database selection failed: %w", err)
-			}
-
-			databaseName = selected.Name
-		} else {
-			databaseName = args[0]
+		databases, err := dbService.ListDatabases(true)
+		if err != nil {
+			return fmt.Errorf("failed to list databases: %w", err)
 		}
 
-		return executeSyncOperation(cfg, dbService, databaseName, dryRun, cmd)
+		if len(databases) == 0 {
+			fmt.Println("No databases found on remote server")
+			return nil
+		}
+
+		shellService := services.NewMySQLShellService(cfg, dbService)
+		shellService.SetQuiet(true)
+
+		result, err := tui.RunApp(cfg, dbService, shellService, databases)
+		if err != nil {
+			return fmt.Errorf("interactive app failed: %w", err)
+		}
+		if result.Cancelled {
+			fmt.Println("Operation cancelled")
+			return nil
+		}
+		return nil
 	},
 }
 
 // executeSyncOperation выполняет синхронизацию через MySQL Shell
-func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseService, databaseName string, dryRun bool, cmd *cobra.Command) error {
+func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseService, databaseName string, dryRun bool, skipConfirmation bool, cmd *cobra.Command) error {
 	shellService := services.NewMySQLShellService(cfg, dbService)
+	formatter := ui.NewFormatter()
 
 	if dryRun {
 		fmt.Printf("🧪 DRY RUN - no changes will be made\n")
@@ -86,7 +80,7 @@ func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseServic
 
 	// Запрашиваем подтверждение у пользователя
 	force, _ := cmd.Flags().GetBool("force")
-	if !force {
+	if !force && !skipConfirmation {
 		message := fmt.Sprintf("This will replace the local database '%s'", databaseName)
 		confirmed, err := RunConfirmationSelector(message)
 		if err != nil {
@@ -107,10 +101,13 @@ func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseServic
 
 	// Показываем результат
 	fmt.Printf("\n✅ Done! %s in %s (dump: %s, restore: %s)\n",
-		ui.FormatSize(syncResult.DumpSize),
+		ui.FormatSize(syncResult.DumpSizeOnDisk),
 		ui.FormatDuration(syncResult.Duration),
 		ui.FormatDuration(syncResult.DumpDuration),
 		ui.FormatDuration(syncResult.RestoreDuration))
+	if syncResult.LogicalSize > 0 || syncResult.Traffic.TotalBytes() > 0 {
+		fmt.Println(formatter.FormatSyncResult(syncResult))
+	}
 
 	return nil
 }

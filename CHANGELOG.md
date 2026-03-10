@@ -1,5 +1,35 @@
 # Changelog
 
+## [4.0.0] - 2026-03-10
+
+### 🚀 Major Changes
+- **TUI-first workflow**: `dbsync` now launches a full-screen terminal UI for database discovery, table selection, execution, and reporting
+- **Interactive settings management**: remote/local connection settings and dump options can be edited from the UI and persisted to `$HOME/.dbsync.env`
+- **Plan-based synchronization**: sync now works with queued targets, selected tables, and runtime options instead of a single positional database argument
+
+### ✨ New Features
+- **Multi-database queue**: select and run several databases in one session
+- **Table-level sync**: choose specific tables per database with automatic foreign-key dependency inclusion
+- **Live progress view**: running screen now shows normalized dump and restore phases, timers, traffic, and ETA
+- **Richer metrics**: reports distinguish source data size, index size, compressed dump size, download traffic, upload traffic, and total network I/O
+- **Config save/load support**: UI settings can be written to and loaded from `.env`-compatible config files
+- **Transport compression controls**: MySQL Shell protocol compression and zstd level are configurable
+
+### 🔧 Improvements
+- **More accurate table metadata**: database lists and plans use data size separately from index size, with best-effort exact row counts where possible
+- **Cleaner mysqlsh integration**: partial dumps use `--includeTables`, errors retain stdout/stderr context, and transport metrics are tracked in both direct and proxy modes
+- **Better observability**: dump and restore subphases are classified into human-readable states instead of raw mysqlsh output
+
+### 🐛 Fixed
+- Fixed progress resets between dump and restore subphases
+- Fixed warm-up ETA noise before enough traffic data is available
+- Fixed Bubble Tea panics in live phase timers caused by empty labels and nil duration maps
+- Fixed raw mysqlsh summary, throughput, and GTID-like lines leaking into phase breakdowns
+
+### ⚠️ Breaking Changes
+- Removed direct positional sync from the root command; the primary sync flow now runs through the interactive TUI
+- Updated configuration workflow to center around in-app editing and persisted `.env` files
+
 ## [3.0.0] - 2025-12-01
 
 ### 🚀 Major Changes
