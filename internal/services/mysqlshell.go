@@ -120,20 +120,33 @@ func (s *MySQLShellService) ValidateDumpOperation(databaseName string) error {
 
 // buildRemoteURI создает URI для подключения к удаленному серверу (без пароля)
 func (s *MySQLShellService) buildRemoteURI() string {
-	return fmt.Sprintf("mysql://%s@%s:%d",
-		s.config.Remote.User,
-		s.config.Remote.Host,
-		s.config.Remote.Port,
-	)
+	return s.buildURI(s.config.Remote, s.config.Remote.Host, s.config.Remote.Port)
 }
 
 // buildLocalURI создает URI для подключения к локальному серверу (без пароля)
 func (s *MySQLShellService) buildLocalURI() string {
-	return fmt.Sprintf("mysql://%s@%s:%d",
-		s.config.Local.User,
-		s.config.Local.Host,
-		s.config.Local.Port,
-	)
+	return s.buildURI(s.config.Local, s.config.Local.Host, s.config.Local.Port)
+}
+
+func (s *MySQLShellService) buildURI(mysqlConfig config.MySQLConfig, host string, port int) string {
+	return fmt.Sprintf("mysql://%s@%s:%d", mysqlConfig.User, host, port)
+}
+
+func (s *MySQLShellService) remoteDumpURI() (string, func(), error) {
+	if !s.config.Remote.HasProxy() {
+		return s.buildRemoteURI(), func() {}, nil
+	}
+
+	tunnel, err := newProxyTunnel(s.config.Remote)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to start proxy tunnel: %w", err)
+	}
+
+	cleanup := func() {
+		_ = tunnel.Close()
+	}
+
+	return s.buildURI(s.config.Remote, tunnel.Host(), tunnel.Port()), cleanup, nil
 }
 
 // CreateDump создает дамп удаленной базы данных через MySQL Shell
@@ -173,9 +186,16 @@ func (s *MySQLShellService) CreateDump(databaseName string, dryRun bool) (*model
 		return nil, "", err
 	}
 
+	remoteURI, cleanup, err := s.remoteDumpURI()
+	if err != nil {
+		os.RemoveAll(dumpDir)
+		return nil, "", err
+	}
+	defer cleanup()
+
 	// Строим команду mysqlsh для дампа
 	args := []string{
-		"--uri", s.buildRemoteURI(),
+		"--uri", remoteURI,
 		fmt.Sprintf("--password=%s", s.config.Remote.Password),
 		"--", "util", "dump-schemas", databaseName,
 		fmt.Sprintf("--outputUrl=%s", dumpDir),

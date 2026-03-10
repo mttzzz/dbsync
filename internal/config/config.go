@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -34,6 +36,7 @@ type MySQLConfig struct {
 	Port     int    `mapstructure:"port"`
 	User     string `mapstructure:"user"`
 	Password string `mapstructure:"password"`
+	ProxyURL string `mapstructure:"proxy_url"`
 }
 
 // DumpConfig содержит настройки для создания дампов
@@ -75,11 +78,13 @@ func Load() (*Config, error) {
 	v.BindEnv("remote.port", "DBSYNC_REMOTE_PORT")
 	v.BindEnv("remote.user", "DBSYNC_REMOTE_USER")
 	v.BindEnv("remote.password", "DBSYNC_REMOTE_PASSWORD")
+	v.BindEnv("remote.proxy_url", "DBSYNC_REMOTE_PROXY_URL")
 
 	v.BindEnv("local.host", "DBSYNC_LOCAL_HOST")
 	v.BindEnv("local.port", "DBSYNC_LOCAL_PORT")
 	v.BindEnv("local.user", "DBSYNC_LOCAL_USER")
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
+	v.BindEnv("local.proxy_url", "DBSYNC_LOCAL_PROXY_URL")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
@@ -127,11 +132,13 @@ func LoadForTest() (*Config, error) {
 	v.BindEnv("remote.port", "DBSYNC_REMOTE_PORT")
 	v.BindEnv("remote.user", "DBSYNC_REMOTE_USER")
 	v.BindEnv("remote.password", "DBSYNC_REMOTE_PASSWORD")
+	v.BindEnv("remote.proxy_url", "DBSYNC_REMOTE_PROXY_URL")
 
 	v.BindEnv("local.host", "DBSYNC_LOCAL_HOST")
 	v.BindEnv("local.port", "DBSYNC_LOCAL_PORT")
 	v.BindEnv("local.user", "DBSYNC_LOCAL_USER")
 	v.BindEnv("local.password", "DBSYNC_LOCAL_PASSWORD")
+	v.BindEnv("local.proxy_url", "DBSYNC_LOCAL_PROXY_URL")
 
 	v.BindEnv("dump.timeout", "DBSYNC_DUMP_TIMEOUT")
 	v.BindEnv("dump.threads", "DBSYNC_DUMP_THREADS")
@@ -166,12 +173,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("remote.port", 3306)
 	v.SetDefault("remote.user", "root")
 	v.SetDefault("remote.password", "")
+	v.SetDefault("remote.proxy_url", "")
 
 	// Локальный MySQL сервер
 	v.SetDefault("local.host", "localhost")
 	v.SetDefault("local.port", 3306)
 	v.SetDefault("local.user", "root")
 	v.SetDefault("local.password", "")
+	v.SetDefault("local.proxy_url", "")
 
 	// Настройки дампа
 	v.SetDefault("dump.timeout", "300s")
@@ -204,7 +213,55 @@ func validate(config *Config) error {
 		return fmt.Errorf("local.host is required")
 	}
 
+	if err := validateProxyURL("remote.proxy_url", config.Remote.ProxyURL); err != nil {
+		return err
+	}
+
+	if err := validateProxyURL("local.proxy_url", config.Local.ProxyURL); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func validateProxyURL(fieldName string, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", fieldName, err)
+	}
+
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("%s must be a full URL like socks5://proxy.example.com:1080", fieldName)
+	}
+
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "socks5", "socks5h":
+		return nil
+	default:
+		return fmt.Errorf("%s has unsupported scheme %q", fieldName, parsed.Scheme)
+	}
+}
+
+func (m MySQLConfig) HasProxy() bool {
+	return strings.TrimSpace(m.ProxyURL) != ""
+}
+
+func (m MySQLConfig) RedactedProxyURL() string {
+	if !m.HasProxy() {
+		return ""
+	}
+
+	parsed, err := url.Parse(m.ProxyURL)
+	if err != nil {
+		return m.ProxyURL
+	}
+
+	return parsed.Redacted()
 }
 
 // GetConnectionString возвращает строку подключения для MySQL

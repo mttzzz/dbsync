@@ -202,8 +202,14 @@ var configCmd = &cobra.Command{
 
 		fmt.Printf("Remote MySQL: %s:%d (user: %s)\n",
 			cfg.Remote.Host, cfg.Remote.Port, cfg.Remote.User)
+		if cfg.Remote.HasProxy() {
+			fmt.Printf("Remote Proxy: %s\n", cfg.Remote.RedactedProxyURL())
+		}
 		fmt.Printf("Local MySQL: %s:%d (user: %s)\n",
 			cfg.Local.Host, cfg.Local.Port, cfg.Local.User)
+		if cfg.Local.HasProxy() {
+			fmt.Printf("Local Proxy: %s\n", cfg.Local.RedactedProxyURL())
+		}
 		fmt.Printf("Dump Timeout: %s\n", cfg.Dump.Timeout)
 		fmt.Printf("\n--- MySQL Shell Settings ---\n")
 		fmt.Printf("Threads: %d\n", cfg.Dump.Threads)

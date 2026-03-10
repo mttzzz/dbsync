@@ -58,6 +58,7 @@ DBSYNC_REMOTE_HOST=your-remote-host.com
 DBSYNC_REMOTE_PORT=3306
 DBSYNC_REMOTE_USER=username
 DBSYNC_REMOTE_PASSWORD=password
+DBSYNC_REMOTE_PROXY_URL=socks5://proxy.example.com:1080
 
 # Локальный сервер
 DBSYNC_LOCAL_HOST=localhost
@@ -68,6 +69,8 @@ DBSYNC_LOCAL_PASSWORD=password
 # Настройки (опционально)
 DBSYNC_DUMP_THREADS=8
 ```
+
+Поддерживаются прокси `socks5://`, `socks5h://`, `http://` и `https://`. Для удалённого MySQL создаётся локальный TCP-туннель, поэтому прокси применяется и к проверкам подключения, и к `mysqlsh dump`.
 
 ## 📖 Использование
 

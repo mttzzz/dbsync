@@ -23,16 +23,53 @@ func NewDatabaseService(cfg *config.Config) *DatabaseService {
 	}
 }
 
+func (ds *DatabaseService) mysqlConfig(isRemote bool) config.MySQLConfig {
+	if isRemote {
+		return ds.config.Remote
+	}
+
+	return ds.config.Local
+}
+
+func (ds *DatabaseService) openConnection(isRemote bool, database string) (*sql.DB, func(), error) {
+	mysqlConfig := ds.mysqlConfig(isRemote)
+	host := mysqlConfig.Host
+	port := mysqlConfig.Port
+	cleanup := func() {}
+
+	if isRemote && mysqlConfig.HasProxy() {
+		tunnel, err := newProxyTunnel(mysqlConfig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to start proxy tunnel: %w", err)
+		}
+
+		host = tunnel.Host()
+		port = tunnel.Port()
+		cleanup = func() {
+			_ = tunnel.Close()
+		}
+	}
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
+		mysqlConfig.User, mysqlConfig.Password, host, port, database)
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+
+	return db, cleanup, nil
+}
+
 // TestConnection проверяет подключение к серверу MySQL
 func (ds *DatabaseService) TestConnection(isRemote bool) (*models.ConnectionInfo, error) {
-	var mysqlConfig config.MySQLConfig
 	var label string
+	mysqlConfig := ds.mysqlConfig(isRemote)
 
 	if isRemote {
-		mysqlConfig = ds.config.Remote
 		label = "remote"
 	} else {
-		mysqlConfig = ds.config.Local
 		label = "local"
 	}
 
@@ -42,15 +79,12 @@ func (ds *DatabaseService) TestConnection(isRemote bool) (*models.ConnectionInfo
 		User: mysqlConfig.User,
 	}
 
-	// Подключаемся к серверу (без указания конкретной БД)
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-		mysqlConfig.User, mysqlConfig.Password, mysqlConfig.Host, mysqlConfig.Port)
-
-	db, err := sql.Open("mysql", dsn)
+	db, cleanup, err := ds.openConnection(isRemote, "")
 	if err != nil {
 		connInfo.Error = fmt.Sprintf("failed to open connection: %v", err)
 		return connInfo, err
 	}
+	defer cleanup()
 	defer db.Close()
 
 	// Проверяем подключение
@@ -74,22 +108,11 @@ func (ds *DatabaseService) TestConnection(isRemote bool) (*models.ConnectionInfo
 
 // ListDatabases возвращает список баз данных на сервере
 func (ds *DatabaseService) ListDatabases(isRemote bool) (models.DatabaseList, error) {
-	var mysqlConfig config.MySQLConfig
-
-	if isRemote {
-		mysqlConfig = ds.config.Remote
-	} else {
-		mysqlConfig = ds.config.Local
-	}
-
-	// Подключаемся к серверу
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-		mysqlConfig.User, mysqlConfig.Password, mysqlConfig.Host, mysqlConfig.Port)
-
-	db, err := sql.Open("mysql", dsn)
+	db, cleanup, err := ds.openConnection(isRemote, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open connection: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
@@ -150,22 +173,11 @@ func (ds *DatabaseService) ListDatabases(isRemote bool) (models.DatabaseList, er
 
 // DatabaseExists проверяет существование базы данных
 func (ds *DatabaseService) DatabaseExists(databaseName string, isRemote bool) (bool, error) {
-	var mysqlConfig config.MySQLConfig
-
-	if isRemote {
-		mysqlConfig = ds.config.Remote
-	} else {
-		mysqlConfig = ds.config.Local
-	}
-
-	// Подключаемся к серверу
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-		mysqlConfig.User, mysqlConfig.Password, mysqlConfig.Host, mysqlConfig.Port)
-
-	db, err := sql.Open("mysql", dsn)
+	db, cleanup, err := ds.openConnection(isRemote, "")
 	if err != nil {
 		return false, fmt.Errorf("failed to open connection: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
@@ -183,22 +195,11 @@ func (ds *DatabaseService) DatabaseExists(databaseName string, isRemote bool) (b
 
 // GetDatabaseInfo возвращает детальную информацию о базе данных
 func (ds *DatabaseService) GetDatabaseInfo(databaseName string, isRemote bool) (*models.Database, error) {
-	var mysqlConfig config.MySQLConfig
-
-	if isRemote {
-		mysqlConfig = ds.config.Remote
-	} else {
-		mysqlConfig = ds.config.Local
-	}
-
-	// Подключаемся к серверу
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/?charset=utf8mb4&parseTime=True&loc=Local&timeout=10s",
-		mysqlConfig.User, mysqlConfig.Password, mysqlConfig.Host, mysqlConfig.Port)
-
-	db, err := sql.Open("mysql", dsn)
+	db, cleanup, err := ds.openConnection(isRemote, "")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open connection: %w", err)
 	}
+	defer cleanup()
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {

@@ -33,15 +33,60 @@ func TestLoad(t *testing.T) {
 					Port:     3306,
 					User:     "remote_user",
 					Password: "remote_pass",
+					ProxyURL: "",
 				},
 				Local: MySQLConfig{
 					Host:     "localhost",
 					Port:     3306,
 					User:     "local_user",
 					Password: "local_pass",
+					ProxyURL: "",
 				},
 				Dump: DumpConfig{
 					Timeout: 5 * time.Minute,
+				},
+				CLI: CLIConfig{
+					DefaultCharset:     "utf8mb4",
+					InteractiveMode:    true,
+					ConfirmDestructive: true,
+				},
+				Log: LogConfig{
+					Level:  "info",
+					Format: "text",
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "remote proxy configuration",
+			envVars: map[string]string{
+				"DBSYNC_REMOTE_HOST":      "remote.example.com",
+				"DBSYNC_REMOTE_USER":      "remote_user",
+				"DBSYNC_REMOTE_PASSWORD":  "remote_pass",
+				"DBSYNC_REMOTE_PROXY_URL": "socks5://proxy.example.com:1080",
+				"DBSYNC_LOCAL_HOST":       "localhost",
+				"DBSYNC_LOCAL_USER":       "local_user",
+				"DBSYNC_LOCAL_PASSWORD":   "local_pass",
+			},
+			expected: &Config{
+				Remote: MySQLConfig{
+					Host:     "remote.example.com",
+					Port:     3306,
+					User:     "remote_user",
+					Password: "remote_pass",
+					ProxyURL: "socks5://proxy.example.com:1080",
+				},
+				Local: MySQLConfig{
+					Host:     "localhost",
+					Port:     3306,
+					User:     "local_user",
+					Password: "local_pass",
+					ProxyURL: "",
+				},
+				Dump: DumpConfig{
+					Timeout:  5 * time.Minute,
+					Threads:  8,
+					Compress: true,
 				},
 				CLI: CLIConfig{
 					DefaultCharset:     "utf8mb4",
@@ -83,6 +128,9 @@ func TestLoad(t *testing.T) {
 				}
 				if tt.expected.Local.Host != got.Local.Host {
 					t.Errorf("Local.Host = %v, want %v", got.Local.Host, tt.expected.Local.Host)
+				}
+				if tt.expected.Remote.ProxyURL != got.Remote.ProxyURL {
+					t.Errorf("Remote.ProxyURL = %v, want %v", got.Remote.ProxyURL, tt.expected.Remote.ProxyURL)
 				}
 				if tt.expected.Dump.Timeout != got.Dump.Timeout {
 					t.Errorf("Dump.Timeout = %v, want %v", got.Dump.Timeout, tt.expected.Dump.Timeout)
@@ -140,6 +188,25 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "invalid proxy URL",
+			config: &Config{
+				Remote: MySQLConfig{
+					Host:     "remote.example.com",
+					Port:     3306,
+					User:     "remote_user",
+					Password: "remote_pass",
+					ProxyURL: "proxy.example.com:1080",
+				},
+				Local: MySQLConfig{
+					Host:     "localhost",
+					Port:     3306,
+					User:     "local_user",
+					Password: "local_pass",
+				},
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -159,10 +226,12 @@ func clearEnvVars() {
 		"DBSYNC_REMOTE_PORT",
 		"DBSYNC_REMOTE_USER",
 		"DBSYNC_REMOTE_PASSWORD",
+		"DBSYNC_REMOTE_PROXY_URL",
 		"DBSYNC_LOCAL_HOST",
 		"DBSYNC_LOCAL_PORT",
 		"DBSYNC_LOCAL_USER",
 		"DBSYNC_LOCAL_PASSWORD",
+		"DBSYNC_LOCAL_PROXY_URL",
 		"DBSYNC_DUMP_TIMEOUT",
 		"DBSYNC_DUMP_THREADS",
 		"DBSYNC_DUMP_COMPRESS",

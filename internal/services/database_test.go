@@ -205,3 +205,15 @@ func TestDatabaseService_ConnectionInfo(t *testing.T) {
 		t.Error("ConnectionInfo.Connected should be false for test")
 	}
 }
+
+func TestMySQLConfig_RedactedProxyURL(t *testing.T) {
+	cfg := config.MySQLConfig{
+		ProxyURL: "http://alice:secret@proxy.example.com:8080",
+	}
+
+	got := cfg.RedactedProxyURL()
+	want := "http://alice:xxxxx@proxy.example.com:8080"
+	if got != want {
+		t.Errorf("RedactedProxyURL() = %v, want %v", got, want)
+	}
+}
