@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.0.1] - 2026-03-10
+
+### 🔧 Fixed
+- Fixed `Makefile` parsing and removed duplicated, stale, and invalid targets
+- Restored working `build-release`, `test-unit`, and related developer workflows after the v4.0.0 release
+
 ## [4.0.0] - 2026-03-10
 
 ### 🚀 Major Changes
