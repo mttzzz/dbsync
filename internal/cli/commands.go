@@ -6,7 +6,6 @@ import (
 	"db-sync-cli/internal/config"
 	"db-sync-cli/internal/services"
 	"db-sync-cli/internal/tui"
-	"db-sync-cli/internal/ui"
 	"db-sync-cli/internal/updater"
 	"db-sync-cli/internal/version"
 
@@ -26,52 +25,74 @@ var rootCmd = &cobra.Command{
 	Long: `dbsync is a CLI tool for synchronizing MySQL databases between remote and local servers.
 Uses MySQL Shell (mysqlsh) for fast parallel dump and restore operations.
 
-	Run without arguments to launch the terminal UI and manage sync from there.`,
+	Run without arguments to launch the full-screen terminal UI.`,
 	Version: version.Version,
 	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, err := config.Load()
+		return runTUI(cmd)
+	},
+}
+
+var tuiCmd = &cobra.Command{
+	Use:   "tui",
+	Short: "Launch the full-screen terminal UI",
+	Long:  `Launch the full-screen terminal UI for database selection, settings and sync execution.`,
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTUI(cmd)
+	},
+}
+
+var textCmd = &cobra.Command{
+	Use:   "text",
+	Short: "Launch the text-mode interface",
+	Long:  `Launch the fallback text-mode interface without the full-screen terminal UI.`,
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := loadCLIConfig(cmd)
 		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
-		}
-
-		threads, _ := cmd.Flags().GetInt("threads")
-
-		// Обновляем конфиг если указаны флаги
-		if threads > 0 {
-			cfg.Dump.Threads = threads
+			return err
 		}
 
 		dbService := services.NewDatabaseService(cfg)
-		databases, err := dbService.ListDatabases(true)
-		if err != nil {
-			return fmt.Errorf("failed to list databases: %w", err)
-		}
-
-		if len(databases) == 0 {
-			fmt.Println("No databases found on remote server")
-			return nil
-		}
-
-		shellService := services.NewMySQLShellService(cfg, dbService)
-		shellService.SetQuiet(true)
-
-		result, err := tui.RunApp(cfg, dbService, shellService, databases)
-		if err != nil {
-			return fmt.Errorf("interactive app failed: %w", err)
-		}
-		if result.Cancelled {
-			fmt.Println("Operation cancelled")
-			return nil
-		}
-		return nil
+		return runTextInteractiveFlow(cfg, dbService, cmd)
 	},
+}
+
+func loadCLIConfig(cmd *cobra.Command) (*config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+
+	threads, _ := cmd.Flags().GetInt("threads")
+	if threads > 0 {
+		cfg.Dump.Threads = threads
+	}
+
+	return cfg, nil
+}
+
+func runTUI(cmd *cobra.Command) error {
+	cfg, err := loadCLIConfig(cmd)
+	if err != nil {
+		return err
+	}
+
+	dbService := services.NewDatabaseService(cfg)
+	shellService := services.NewMySQLShellService(cfg, dbService)
+
+	_, err = tui.RunApp(cfg, dbService, shellService, nil)
+	if err != nil {
+		return fmt.Errorf("failed to run TUI: %w", err)
+	}
+
+	return nil
 }
 
 // executeSyncOperation выполняет синхронизацию через MySQL Shell
 func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseService, databaseName string, dryRun bool, skipConfirmation bool, cmd *cobra.Command) error {
 	shellService := services.NewMySQLShellService(cfg, dbService)
-	formatter := ui.NewFormatter()
 
 	if dryRun {
 		fmt.Printf("🧪 DRY RUN - no changes will be made\n")
@@ -82,7 +103,7 @@ func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseServic
 	force, _ := cmd.Flags().GetBool("force")
 	if !force && !skipConfirmation {
 		message := fmt.Sprintf("This will replace the local database '%s'", databaseName)
-		confirmed, err := RunConfirmationSelector(message)
+		confirmed, err := promptForConfirmation(message)
 		if err != nil {
 			return fmt.Errorf("confirmation failed: %w", err)
 		}
@@ -101,12 +122,12 @@ func executeSyncOperation(cfg *config.Config, dbService *services.DatabaseServic
 
 	// Показываем результат
 	fmt.Printf("\n✅ Done! %s in %s (dump: %s, restore: %s)\n",
-		ui.FormatSize(syncResult.DumpSizeOnDisk),
-		ui.FormatDuration(syncResult.Duration),
-		ui.FormatDuration(syncResult.DumpDuration),
-		ui.FormatDuration(syncResult.RestoreDuration))
+		formatBytes(syncResult.DumpSizeOnDisk),
+		formatDuration(syncResult.Duration),
+		formatDuration(syncResult.DumpDuration),
+		formatDuration(syncResult.RestoreDuration))
 	if syncResult.LogicalSize > 0 || syncResult.Traffic.TotalBytes() > 0 {
-		fmt.Println(formatter.FormatSyncResult(syncResult))
+		printSyncResult(syncResult)
 	}
 
 	return nil
@@ -124,7 +145,6 @@ var listCmd = &cobra.Command{
 		}
 
 		dbService := services.NewDatabaseService(cfg)
-		formatter := ui.NewFormatter()
 
 		fmt.Printf("Connecting to remote server %s:%d...\n", cfg.Remote.Host, cfg.Remote.Port)
 
@@ -134,12 +154,11 @@ var listCmd = &cobra.Command{
 		}
 
 		if len(databases) == 0 {
-			fmt.Println(ui.InfoStyle.Render("No databases found on remote server"))
+			fmt.Println("No databases found on remote server")
 			return nil
 		}
 
-		output := formatter.FormatDatabaseList(databases, cfg.Remote.Host)
-		fmt.Println(output)
+		printDatabaseList(databases, cfg.Remote.Host)
 
 		return nil
 	},
@@ -157,29 +176,28 @@ var statusCmd = &cobra.Command{
 		}
 
 		dbService := services.NewDatabaseService(cfg)
-		formatter := ui.NewFormatter()
 
-		fmt.Println(ui.InfoStyle.Render("Checking MySQL server connections..."))
+		fmt.Println("Checking MySQL server connections...")
 		fmt.Println()
 
 		// Проверяем удаленный сервер
 		remoteInfo, _ := dbService.TestConnection(true)
-		output := formatter.FormatConnectionStatus(remoteInfo, "Remote")
+		output := formatConnectionStatus(remoteInfo, "Remote")
 		fmt.Print(output)
 
 		fmt.Println()
 
 		// Проверяем локальный сервер
 		localInfo, _ := dbService.TestConnection(false)
-		output = formatter.FormatConnectionStatus(localInfo, "Local")
+		output = formatConnectionStatus(localInfo, "Local")
 		fmt.Print(output)
 
 		// Общий статус
 		fmt.Println()
 		if remoteInfo.Connected && localInfo.Connected {
-			fmt.Println(ui.FormatStatus("success", "All connections are working!"))
+			fmt.Println("OK: All connections are working!")
 		} else {
-			fmt.Println(ui.FormatStatus("warning", "Some connections have issues. Please check your configuration."))
+			fmt.Println("WARN: Some connections have issues. Please check your configuration.")
 		}
 
 		return nil
@@ -234,7 +252,7 @@ var upgradeCmd = &cobra.Command{
 	Long: `Check for the latest version of dbsync on GitHub and upgrade if a newer version is available.
 This command will download and replace the current executable with the latest version.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(ui.InfoStyle.Render("🔍 Checking for updates..."))
+		fmt.Println("Checking for updates...")
 
 		up := updater.NewUpdater()
 		updateInfo, err := up.CheckForUpdates()
@@ -251,7 +269,7 @@ This command will download and replace the current executable with the latest ve
 		fmt.Printf("\n🎉 New version available!\n")
 		fmt.Printf("   Current: %s\n", updateInfo.CurrentVersion)
 		fmt.Printf("   Latest:  %s\n", updateInfo.LatestVersion)
-		fmt.Printf("   Size:    %s\n", ui.FormatSize(updateInfo.AssetSize))
+		fmt.Printf("   Size:    %s\n", formatBytes(updateInfo.AssetSize))
 		fmt.Printf("   Released: %s\n", updateInfo.PublishedAt.Format("2006-01-02"))
 
 		// Запрашиваем подтверждение
@@ -263,7 +281,7 @@ This command will download and replace the current executable with the latest ve
 		force, _ := cmd.Flags().GetBool("force")
 		if !force {
 			message := fmt.Sprintf("Download and install version %s?", updateInfo.LatestVersion)
-			confirmed, err := RunConfirmationSelector(message)
+			confirmed, err := promptForConfirmation(message)
 			if err != nil {
 				return fmt.Errorf("confirmation failed: %w", err)
 			}
@@ -284,7 +302,7 @@ This command will download and replace the current executable with the latest ve
 		if result.Success {
 			fmt.Printf("✅ Update completed successfully!\n")
 			fmt.Printf("   Updated from %s to %s\n", result.PreviousVersion, result.NewVersion)
-			fmt.Printf("   Duration: %s\n", ui.FormatDuration(result.Duration))
+			fmt.Printf("   Duration: %s\n", formatDuration(result.Duration))
 			fmt.Printf("\n💡 The application has been updated. You can continue using it immediately.\n")
 		} else {
 			return fmt.Errorf("update failed: %s", result.Error)
@@ -319,4 +337,6 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(upgradeCmd)
+	rootCmd.AddCommand(tuiCmd)
+	rootCmd.AddCommand(textCmd)
 }

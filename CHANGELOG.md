@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.2] - 2026-03-10
+
+### 🔧 Fixed
+- Fixed macOS local install flow by codesigning built and installed binaries to avoid immediate `Killed: 9` launches
+- Restored the full-screen TUI as the default `dbsync` entrypoint and kept the fallback text mode under `dbsync text`
+- Restored automatic remote database loading on TUI startup so the queue screen no longer opens empty by default
+
 ## [4.0.1] - 2026-03-10
 
 ### 🔧 Fixed

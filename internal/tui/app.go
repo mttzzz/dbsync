@@ -156,6 +156,7 @@ type AppModel struct {
 	remoteTestStatus  string
 	localTestStatus   string
 	connectionTesting bool
+	databasesLoading  bool
 
 	runningPlan          *models.SyncPlan
 	runningResults       []models.SyncResult
@@ -212,6 +213,9 @@ func NewAppModel(cfg *config.Config, browser DatabaseBrowser, runner SyncExecuto
 	}
 	model.initSettingsFields()
 	model.updateFilter()
+	if len(copyList) == 0 {
+		model.notice = subtleStyle.Render("Loading remote databases...")
+	}
 	return model
 }
 
@@ -225,7 +229,13 @@ func RunApp(cfg *config.Config, browser DatabaseBrowser, runner SyncExecutor, da
 	return &result, nil
 }
 
-func (m *AppModel) Init() tea.Cmd { return nil }
+func (m *AppModel) Init() tea.Cmd {
+	if len(m.databases) > 0 {
+		return nil
+	}
+	m.databasesLoading = true
+	return m.reloadDatabasesCmd()
+}
 
 func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -249,6 +259,7 @@ func (m *AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case databasesReloadedMsg:
+		m.databasesLoading = false
 		if msg.Err != nil {
 			m.setNotice(dangerStyle.Render(msg.Err.Error()))
 			return m, nil
@@ -776,13 +787,20 @@ func (m *AppModel) renderMainContent(width int) string {
 
 func (m *AppModel) renderListView(width int) string {
 	lines := []string{headerStyle.UnsetBackground().Render("Database Queue Builder"), "", m.listSummary(), ""}
+	if m.databasesLoading {
+		return wrapLines(append(lines, warnStyle.Render("Loading remote databases...")), width)
+	}
 	if m.searching {
 		lines = append(lines, fmt.Sprintf("Search: %s", keyStyle.Render(m.search+cursorSuffix())), "")
 	} else if m.search != "" {
 		lines = append(lines, subtleStyle.Render("Filter: "+m.search), "")
 	}
 	if len(m.filtered) == 0 {
-		return wrapLines(append(lines, subtleStyle.Render("No databases match the current filter.")), width)
+		message := subtleStyle.Render("No databases match the current filter.")
+		if len(m.databases) == 0 && m.search == "" {
+			message = subtleStyle.Render("No databases loaded yet. Press R to load remote databases.")
+		}
+		return wrapLines(append(lines, message), width)
 	}
 	visible := clampInt(m.height-14, 8, 18)
 	start, end := visibleRange(m.cursor, len(m.filtered), visible)

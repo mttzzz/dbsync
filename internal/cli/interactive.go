@@ -1,3 +1,6 @@
+//go:build disabled_bubbletea
+// +build disabled_bubbletea
+
 package cli
 
 import (

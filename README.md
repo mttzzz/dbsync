@@ -51,6 +51,18 @@ winget install Oracle.MySQLShell
 brew install mysql-shell
 ```
 
+### macOS note
+
+If a locally built binary exits immediately with `Killed: 9`, this is usually not a shell or Full Disk Access issue. On some macOS setups the copied binary needs an explicit ad-hoc signature after build/install.
+
+The Makefile now does this automatically on macOS for `make build`, `make build-release` and `make install` using the identifier `dev.mttzzz.dbsync`.
+
+If you copy the binary manually, re-sign it once:
+
+```bash
+codesign --force --sign - --identifier dev.mttzzz.dbsync /opt/homebrew/bin/dbsync
+```
+
 ## ⚙️ Настройка
 
 Создайте `.env` файл или заполните настройки прямо в TUI и сохраните их:

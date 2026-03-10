@@ -254,6 +254,50 @@ func TestWrapLinesSplitsEmbeddedNewlines(t *testing.T) {
 	assert.Equal(t, []string{"alpha", "beta", "gamma"}, strings.Split(rendered, "\n"))
 }
 
+func TestInitStartsDatabaseLoadWhenNoPreloadedDatabases(t *testing.T) {
+	browser := &mockBrowser{databases: models.DatabaseList{{Name: "alpha", Size: 100, Tables: 1}}}
+	model := NewAppModel(&config.Config{
+		Remote: config.MySQLConfig{Host: "remote.example.com", Port: 3306},
+		Local:  config.MySQLConfig{Host: "localhost", Port: 3306},
+		Dump:   config.DumpConfig{Threads: 8, Timeout: 5 * time.Minute, Compress: true},
+	}, browser, &mockRunner{}, nil)
+
+	cmd := model.Init()
+	assert.NotNil(t, cmd)
+	assert.True(t, model.databasesLoading)
+	assert.Contains(t, stripANSI(model.notice), "Loading remote databases...")
+}
+
+func TestInitSkipsDatabaseLoadWhenPreloadedDatabasesExist(t *testing.T) {
+	model := newTestModel()
+
+	cmd := model.Init()
+	assert.Nil(t, cmd)
+	assert.False(t, model.databasesLoading)
+}
+
+func TestRenderListViewShowsLoadingState(t *testing.T) {
+	model := newTestModel()
+	model.databases = nil
+	model.filtered = nil
+	model.databasesLoading = true
+
+	rendered := stripANSI(model.renderListView(90))
+	assert.Contains(t, rendered, "Loading remote databases...")
+	assert.NotContains(t, rendered, "No databases match the current filter.")
+}
+
+func TestRenderListViewShowsManualLoadHintWhenNoDatabasesLoaded(t *testing.T) {
+	model := newTestModel()
+	model.databases = nil
+	model.filtered = nil
+	model.databasesLoading = false
+	model.search = ""
+
+	rendered := stripANSI(model.renderListView(90))
+	assert.Contains(t, rendered, "No databases loaded yet. Press R to load remote databases.")
+}
+
 func TestFormatGroupedInt64(t *testing.T) {
 	assert.Equal(t, "0", formatGroupedInt64(0))
 	assert.Equal(t, "62", formatGroupedInt64(62))

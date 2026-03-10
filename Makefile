@@ -8,12 +8,21 @@ DOCKER_TAG := latest
 GO_FILES := $(shell find . -name "*.go" -not -path "./vendor/*" -not -path "./coverage/*")
 UNIT_TEST_PACKAGES := ./internal/config ./internal/models ./internal/version ./pkg/utils ./internal/services ./internal/cli ./internal/ui ./internal/tui
 INSTALL_DIR ?= $(or $(GOBIN),$(shell go env GOPATH)/bin)
+OS_NAME := $(shell uname -s)
+MACOS_CODESIGN_ID ?= dev.mttzzz.dbsync
 
 GREEN := \033[0;32m
 YELLOW := \033[1;33m
 RED := \033[0;31m
 BLUE := \033[0;34m
 NC := \033[0m
+
+define maybe_codesign
+	@if [ "$(OS_NAME)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then \
+		echo "$(YELLOW)Codesigning $(1) with identifier $(MACOS_CODESIGN_ID)...$(NC)"; \
+		codesign --force --sign - --identifier "$(MACOS_CODESIGN_ID)" "$(1)"; \
+	fi
+endef
 
 help: ## Показать справку
 	@echo "$(BLUE)DB Sync CLI - Команды для разработки$(NC)"
@@ -24,12 +33,14 @@ build: ## Собрать бинарный файл
 	@echo "$(YELLOW)Сборка $(BINARY_NAME)...$(NC)"
 	@mkdir -p $(BUILD_DIR)
 	@go build -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dbsync
+	$(call maybe_codesign,$(BUILD_DIR)/$(BINARY_NAME))
 	@echo "$(GREEN)Сборка завершена: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
 build-release: ## Собрать release версию
 	@echo "$(YELLOW)Сборка release версии $(VERSION)...$(NC)"
 	@mkdir -p $(BUILD_DIR)
 	@go build -ldflags="-X 'db-sync-cli/internal/version.Version=$(VERSION)' -X 'db-sync-cli/internal/version.BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'db-sync-cli/internal/version.GitCommit=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)'" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/dbsync
+	$(call maybe_codesign,$(BUILD_DIR)/$(BINARY_NAME))
 	@echo "$(GREEN)Release сборка завершена: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
 build-all: ## Собрать для всех платформ
@@ -55,6 +66,7 @@ install: build ## Установить бинарь в bin-каталог Go
 	@echo "$(YELLOW)Установка $(BINARY_NAME) в $(INSTALL_DIR)...$(NC)"
 	@mkdir -p $(INSTALL_DIR)
 	@cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
+	$(call maybe_codesign,$(INSTALL_DIR)/$(BINARY_NAME))
 	@echo "$(GREEN)$(BINARY_NAME) установлен: $(INSTALL_DIR)/$(BINARY_NAME)$(NC)"
 
 test: test-unit ## Запустить unit тесты
