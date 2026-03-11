@@ -81,6 +81,7 @@ func runTUI(cmd *cobra.Command) error {
 
 	dbService := services.NewDatabaseService(cfg)
 	shellService := services.NewMySQLShellService(cfg, dbService)
+	shellService.SetQuiet(true)
 
 	_, err = tui.RunApp(cfg, dbService, shellService, nil)
 	if err != nil {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.0.3] - 2026-03-11
+
+### 🔧 Fixed
+- Fixed fullscreen TUI runs leaking raw `mysqlsh` stdout/stderr into the running and report screens
+- Kept MySQL Shell progress data inside the normalized TUI progress model instead of printing terminal-noise over Bubble Tea rendering
+
 ## [4.0.2] - 2026-03-10
 
 ### 🔧 Fixed
